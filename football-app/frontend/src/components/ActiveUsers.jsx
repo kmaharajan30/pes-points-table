@@ -34,7 +34,7 @@ export default function ActiveUsers({ user }) {
     controllerRef.current = controller;
 
     // fetch-based SSE so we can send the x-user-id header (native EventSource doesn't support headers)
-    fetch(`http://localhost:5000/api/presence/${encodeURIComponent(user.code)}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/presence/${encodeURIComponent(user.code)}`, {
       headers: { 'x-user-id': user.id },
       signal: controller.signal,
     })

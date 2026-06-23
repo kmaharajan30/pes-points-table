@@ -44,7 +44,7 @@ export default function App() {
   useEffect(() => {
     const stored = JSON.parse(localStorage.getItem('fp_user') || 'null');
     if (!stored?.id) return;
-    fetch('http://localhost:5000/api/tournaments', { headers: { 'x-user-id': stored.id } })
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/tournaments`, { headers: { 'x-user-id': stored.id } })
       .then(r => { if (r.status === 401) { localStorage.removeItem('fp_user'); setUser(null); } })
       .catch(() => {});
   }, []);
