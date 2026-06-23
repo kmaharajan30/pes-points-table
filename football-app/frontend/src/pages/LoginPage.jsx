@@ -101,7 +101,7 @@ export default function LoginPage({ onLogin }) {
               </Alert>
             )}
 
-            <form onSubmit={handleSubmit} noValidate>
+            <form onSubmit={handleSubmit} noValidate autoComplete="off">
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
                 <TextField
                   label="Your Name"
@@ -109,6 +109,7 @@ export default function LoginPage({ onLogin }) {
                   autoFocus
                   value={form.name}
                   onChange={e => setForm({ ...form, name: e.target.value })}
+                  inputProps={{ autoComplete: 'off' }}
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
@@ -125,7 +126,7 @@ export default function LoginPage({ onLogin }) {
                   type={showCode ? 'text' : 'password'}
                   value={form.code}
                   onChange={e => setForm({ ...form, code: e.target.value })}
-                  inputProps={{ minLength: 4 }}
+                  inputProps={{ minLength: 4, autoComplete: 'new-password' }}
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
