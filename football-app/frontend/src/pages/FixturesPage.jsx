@@ -285,10 +285,20 @@ function KnockoutBracket({ tournament, teams, bracket, onResult, onDelete, onAdv
     );
   }
 
-  const currentRound       = bracket[bracket.length-1];
-  const allMatchesComplete = currentRound.matches.every(m=>m.winner);
-  const isFinal            = currentRound.roundName==='Final';
-  const champion           = isFinal && allMatchesComplete ? currentRound.matches[0]?.winner : null;
+  // Find current active round = first round that has teams but not all matches complete
+  const activeRoundIndex = bracket.findIndex(r =>
+    r.matches.some(m => !m.isPlaceholder) && !r.matches.every(m => m.isPlaceholder || m.winner)
+  );
+  const currentRoundIndex = activeRoundIndex === -1
+    ? bracket.findIndex(r => r.matches.some(m => !m.isPlaceholder && m.winner)) // last completed round
+    : activeRoundIndex;
+
+  const currentRound       = bracket[currentRoundIndex] || bracket[bracket.length - 1];
+  const allMatchesComplete = currentRound?.matches
+    .filter(m => !m.isPlaceholder)
+    .every(m => m.winner);
+  const isFinal            = currentRound?.roundName === 'Final';
+  const champion           = isFinal && allMatchesComplete ? currentRound.matches.find(m => m.winner)?.winner : null;
 
   return (
     <Box>
@@ -324,26 +334,38 @@ function KnockoutBracket({ tournament, teams, bracket, onResult, onDelete, onAdv
       <Box sx={{ overflowX:'auto', pb:1, mx:-1.5, px:1.5 }}>
         <Box sx={{ display:'flex', gap:{ xs:1.5, sm:2 }, alignItems:'flex-start',
           minWidth: bracket.length > 1 ? bracket.length * 230 : 'auto' }}>
-          {bracket.map((round, ri) => (
-            <Box key={round.round} sx={{ flex:1, minWidth:{ xs:200, sm:240 } }}>
-              <Box sx={{ textAlign:'center', mb:1.5, py:1, borderRadius:1.5,
-                background: ri===bracket.length-1
-                  ? 'linear-gradient(135deg,rgba(0,230,118,0.15),rgba(101,31,255,0.15))'
-                  : 'rgba(255,255,255,0.04)',
-                border:`1px solid ${ri===bracket.length-1?'rgba(0,230,118,0.3)':'rgba(255,255,255,0.07)'}` }}>
-                <Typography variant="overline" sx={{ fontWeight:800, letterSpacing:'0.08em', fontSize:9,
-                  color:ri===bracket.length-1?'primary.main':'text.secondary' }}>
-                  {round.roundName}
-                </Typography>
+          {bracket.map((round, ri) => {
+            const isActive = ri === currentRoundIndex;
+            const isPast   = ri < currentRoundIndex;
+            return (
+              <Box key={round.round} sx={{ flex:1, minWidth:{ xs:200, sm:240 } }}>
+                <Box sx={{ textAlign:'center', mb:1.5, py:1, borderRadius:1.5,
+                  background: isActive
+                    ? 'linear-gradient(135deg,rgba(0,230,118,0.15),rgba(101,31,255,0.15))'
+                    : isPast
+                      ? 'rgba(0,230,118,0.05)'
+                      : 'rgba(255,255,255,0.02)',
+                  border:`1px solid ${isActive ? 'rgba(0,230,118,0.3)' : isPast ? 'rgba(0,230,118,0.15)' : 'rgba(255,255,255,0.05)'}` }}>
+                  <Typography variant="overline" sx={{ fontWeight:800, letterSpacing:'0.08em', fontSize:9,
+                    color: isActive ? 'primary.main' : isPast ? 'rgba(0,230,118,0.6)' : 'text.disabled' }}>
+                    {round.roundName}
+                  </Typography>
+                  {isPast && (
+                    <Typography variant="caption" sx={{ display:'block', color:'rgba(0,230,118,0.5)', fontSize:9 }}>✓ Completed</Typography>
+                  )}
+                  {!isActive && !isPast && round.matches.every(m => m.isPlaceholder) && (
+                    <Typography variant="caption" sx={{ display:'block', color:'text.disabled', fontSize:9 }}>Awaiting results</Typography>
+                  )}
+                </Box>
+                <Stack spacing={1.5}>
+                  {round.matches.map(match=>(
+                    <KnockoutMatch key={match.matchNumber} match={match}
+                      onResult={onResult} onDelete={onDelete} isCurrentRound={isActive} />
+                  ))}
+                </Stack>
               </Box>
-              <Stack spacing={1.5}>
-                {round.matches.map(match=>(
-                  <KnockoutMatch key={match.matchNumber} match={match}
-                    onResult={onResult} onDelete={onDelete} isCurrentRound={ri===bracket.length-1} />
-                ))}
-              </Stack>
-            </Box>
-          ))}
+            );
+          })}
         </Box>
       </Box>
     </Box>
@@ -351,10 +373,46 @@ function KnockoutBracket({ tournament, teams, bracket, onResult, onDelete, onAdv
 }
 
 function KnockoutMatch({ match, onResult, onDelete, isCurrentRound }) {
-  const homeName = match.homeTeam?.name || '?';
-  const awayName = match.awayTeam?.name || '?';
+  const homeName = match.homeTeam?.name;
+  const awayName = match.awayTeam?.name;
   const winnerName = match.winner?.name;
   const both = match.leg1?.played && match.leg2?.played;
+  const isPlaceholder = match.isPlaceholder || (!homeName && !awayName);
+
+  if (isPlaceholder) {
+    return (
+      <Card sx={{ background:'rgba(255,255,255,0.02)', border:'1px dashed rgba(255,255,255,0.1)', borderRadius:2 }}>
+        <CardContent sx={{ p:'14px !important' }}>
+          <Box sx={{ display:'flex', alignItems:'center', justifyContent:'space-between', mb:1.5 }}>
+            <Box sx={{ display:'flex', alignItems:'center', gap:1 }}>
+              <Box sx={{ width:28, height:28, borderRadius:'50%', bgcolor:'rgba(255,255,255,0.06)',
+                display:'flex', alignItems:'center', justifyContent:'center' }}>
+                <Typography sx={{ fontSize:11, color:'text.disabled', fontWeight:700 }}>?</Typography>
+              </Box>
+              <Typography variant="body2" sx={{ fontWeight:600, color:'text.disabled' }}>TBD</Typography>
+            </Box>
+            <Typography variant="caption" color="text.disabled" sx={{ fontWeight:700 }}>vs</Typography>
+            <Box sx={{ display:'flex', alignItems:'center', gap:1 }}>
+              <Typography variant="body2" sx={{ fontWeight:600, color:'text.disabled' }}>TBD</Typography>
+              <Box sx={{ width:28, height:28, borderRadius:'50%', bgcolor:'rgba(255,255,255,0.06)',
+                display:'flex', alignItems:'center', justifyContent:'center' }}>
+                <Typography sx={{ fontSize:11, color:'text.disabled', fontWeight:700 }}>?</Typography>
+              </Box>
+            </Box>
+          </Box>
+          <Box sx={{ display:'flex', flexDirection:'column', gap:0.75 }}>
+            {[1,2].map(leg => (
+              <Box key={leg} sx={{ display:'flex', alignItems:'center', gap:1, p:'6px 10px', borderRadius:1.5,
+                background:'rgba(255,255,255,0.02)', border:'1px dashed rgba(255,255,255,0.06)' }}>
+                <Typography variant="caption" sx={{ color:'text.disabled', fontWeight:700, minWidth:36, fontSize:10 }}>LEG {leg}</Typography>
+                <Chip label="TBD" size="small" sx={{ bgcolor:'rgba(255,255,255,0.04)', color:'text.disabled', fontWeight:600, fontSize:10 }} />
+              </Box>
+            ))}
+          </Box>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card sx={{ background:'linear-gradient(135deg,#111827,#161f30)',

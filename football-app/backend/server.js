@@ -118,10 +118,10 @@ function computeTable(tournamentId) {
     .sort((a,b) => b.pts-a.pts || b.gd-a.gd || b.gf-a.gf);
 }
 
-// Knockout round names
-function roundName(teamsCount, round) {
-  const rounds = Math.ceil(Math.log2(teamsCount));
-  const diff   = rounds - round;
+// Knockout round names — pass total bracket size (power of 2)
+function roundName(bracketSize, round) {
+  const totalRounds = Math.log2(bracketSize);
+  const diff = totalRounds - round;
   if (diff === 0) return 'Final';
   if (diff === 1) return 'Semi-Final';
   if (diff === 2) return 'Quarter-Final';
@@ -144,9 +144,8 @@ function generateLeagueFixtures(teams, tournamentId) {
   return fixtures;
 }
 
-// Generate knockout bracket fixtures (round 1 only; further rounds generated after results)
-function generateKnockoutRound1(teams, tournamentId) {
-  // Pad to power of 2 with byes
+// Generate knockout bracket — ALL rounds upfront with TBD placeholders
+function generateFullKnockoutBracket(teams, tournamentId) {
   const n = teams.length;
   const size = Math.pow(2, Math.ceil(Math.log2(n)));
   const padded = [...teams];
@@ -158,21 +157,30 @@ function generateKnockoutRound1(teams, tournamentId) {
     [padded[i], padded[j]] = [padded[j], padded[i]];
   }
 
-  const rounds = Math.ceil(Math.log2(size));
-  const fixtures = [];
+  const totalRounds = Math.ceil(Math.log2(size));
+  const allFixtures = [];
 
+  // Round 1: actual teams
   for (let m = 0; m < size / 2; m++) {
     const home = padded[m * 2];
     const away = padded[m * 2 + 1];
-
     if (!home || !away) continue; // skip bye matches
-
-    // Leg 1
-    fixtures.push({ id: uuidv4(), tournament_id: tournamentId, home_team_id: home.id, away_team_id: away.id, fixture_type: 'knockout', round: 1, match_number: m + 1, leg: 1 });
-    // Leg 2 (reversed)
-    fixtures.push({ id: uuidv4(), tournament_id: tournamentId, home_team_id: away.id, away_team_id: home.id, fixture_type: 'knockout', round: 1, match_number: m + 1, leg: 2 });
+    const mn = m + 1;
+    allFixtures.push({ id: uuidv4(), tournament_id: tournamentId, home_team_id: home.id, away_team_id: away.id, fixture_type: 'knockout', round: 1, match_number: mn, leg: 1 });
+    allFixtures.push({ id: uuidv4(), tournament_id: tournamentId, home_team_id: away.id, away_team_id: home.id, fixture_type: 'knockout', round: 1, match_number: mn, leg: 2 });
   }
-  return { fixtures, totalRounds: rounds, totalTeams: n };
+
+  // Rounds 2+: placeholder fixtures (null teams = TBD)
+  let matchesInRound = size / 2;
+  for (let r = 2; r <= totalRounds; r++) {
+    matchesInRound = matchesInRound / 2;
+    for (let m = 1; m <= matchesInRound; m++) {
+      allFixtures.push({ id: uuidv4(), tournament_id: tournamentId, home_team_id: null, away_team_id: null, fixture_type: 'knockout', round: r, match_number: m, leg: 1 });
+      allFixtures.push({ id: uuidv4(), tournament_id: tournamentId, home_team_id: null, away_team_id: null, fixture_type: 'knockout', round: r, match_number: m, leg: 2 });
+    }
+  }
+
+  return { fixtures: allFixtures, totalRounds, totalTeams: n };
 }
 
 // Determine knockout winner of a two-legged tie
@@ -292,12 +300,15 @@ app.post('/api/tournaments/:tId/generate-fixtures', requireAuth, (req, res) => {
     insertMany();
     res.json({ message: `Generated ${fixtures.length} league fixtures`, count: fixtures.length });
   } else {
-    const { fixtures, totalRounds, totalTeams } = generateKnockoutRound1(teams, req.params.tId);
+    const { fixtures, totalRounds, totalTeams } = generateFullKnockoutBracket(teams, req.params.tId);
     const insertMany = db.transaction(() => fixtures.forEach(f => insertFix.run(f.id,f.tournament_id,f.home_team_id,f.away_team_id,f.fixture_type,f.round,f.match_number,f.leg)));
     insertMany();
-    // Store round name
-    db.prepare('INSERT INTO knockout_rounds (id,tournament_id,round,round_name) VALUES (?,?,?,?)').run(uuidv4(), req.params.tId, 1, roundName(totalTeams, 1));
-    res.json({ message: `Generated knockout bracket`, count: fixtures.length, totalRounds });
+    // Store all round names
+    const totalSize = Math.pow(2, Math.ceil(Math.log2(totalTeams)));
+    for (let r = 1; r <= totalRounds; r++) {
+      db.prepare('INSERT INTO knockout_rounds (id,tournament_id,round,round_name) VALUES (?,?,?,?)').run(uuidv4(), req.params.tId, r, roundName(totalSize, r));
+    }
+    res.json({ message: `Generated full knockout bracket`, count: fixtures.length, totalRounds });
   }
 });
 
@@ -328,24 +339,29 @@ app.post('/api/tournaments/:tId/knockout-advance', requireAuth, (req, res) => {
     return res.json({ message: 'Tournament complete', champion: winners[0], done: true });
   }
 
-  // Generate next round
+  // Update existing placeholder fixtures for next round with actual winner team IDs
   const nextRound = maxRound + 1;
-  const insertFix = db.prepare('INSERT INTO fixtures (id,tournament_id,home_team_id,away_team_id,fixture_type,round,match_number,leg) VALUES (?,?,?,?,?,?,?,?)');
-  const newFixtures = [];
+  const nextFixtures = db.prepare('SELECT * FROM fixtures WHERE tournament_id=? AND fixture_type=? AND round=? ORDER BY match_number,leg').all(req.params.tId, 'knockout', nextRound);
 
-  for (let i = 0; i < winners.length; i += 2) {
-    const home = winners[i], away = winners[i + 1];
-    if (!away) continue;
-    const mn = Math.floor(i / 2) + 1;
-    newFixtures.push({ id: uuidv4(), tournament_id: req.params.tId, home_team_id: home, away_team_id: away, fixture_type: 'knockout', round: nextRound, match_number: mn, leg: 1 });
-    newFixtures.push({ id: uuidv4(), tournament_id: req.params.tId, home_team_id: away, away_team_id: home, fixture_type: 'knockout', round: nextRound, match_number: mn, leg: 2 });
+  if (nextFixtures.length === 0) {
+    return res.status(400).json({ error: 'No next round fixtures found. Please re-generate the bracket.' });
   }
 
-  const teams = db.prepare('SELECT * FROM teams WHERE tournament_id=?').all(req.params.tId);
-  db.transaction(() => newFixtures.forEach(f => insertFix.run(f.id,f.tournament_id,f.home_team_id,f.away_team_id,f.fixture_type,f.round,f.match_number,f.leg)))();
-  db.prepare('INSERT INTO knockout_rounds (id,tournament_id,round,round_name) VALUES (?,?,?,?)').run(uuidv4(), req.params.tId, nextRound, roundName(teams.length, nextRound));
+  const updateFix = db.prepare('UPDATE fixtures SET home_team_id=?, away_team_id=? WHERE id=?');
+  db.transaction(() => {
+    for (let i = 0; i < winners.length; i += 2) {
+      const homeWinner = winners[i];
+      const awayWinner = winners[i + 1];
+      if (!awayWinner) continue;
+      const mn = Math.floor(i / 2) + 1;
+      const leg1 = nextFixtures.find(f => f.match_number === mn && f.leg === 1);
+      const leg2 = nextFixtures.find(f => f.match_number === mn && f.leg === 2);
+      if (leg1) updateFix.run(homeWinner, awayWinner, leg1.id);
+      if (leg2) updateFix.run(awayWinner, homeWinner, leg2.id);
+    }
+  })();
 
-  res.json({ message: `Advanced to round ${nextRound}`, count: newFixtures.length, done: false });
+  res.json({ message: `Advanced to round ${nextRound}`, done: false });
 });
 
 // Get knockout bracket structure
@@ -353,14 +369,14 @@ app.get('/api/tournaments/:tId/knockout-bracket', requireAuth, (req, res) => {
   const t = db.prepare('SELECT * FROM tournaments WHERE id=? AND code=?').get(req.params.tId, req.user.code);
   if (!t || t.type !== 'knockout') return res.status(400).json({ error: 'Not a knockout tournament' });
 
-  // Clean up orphaned fixtures before building bracket
+  // Clean up only non-placeholder orphaned fixtures (has team IDs but team was deleted)
   db.prepare(`
     DELETE FROM fixtures
     WHERE tournament_id = ?
+      AND home_team_id IS NOT NULL
       AND (
-        (home_team_id IS NOT NULL AND home_team_id NOT IN (SELECT id FROM teams WHERE tournament_id = ?))
-        OR
-        (away_team_id IS NOT NULL AND away_team_id NOT IN (SELECT id FROM teams WHERE tournament_id = ?))
+        home_team_id NOT IN (SELECT id FROM teams WHERE tournament_id = ?)
+        OR away_team_id NOT IN (SELECT id FROM teams WHERE tournament_id = ?)
       )
   `).run(req.params.tId, req.params.tId, req.params.tId);
 
@@ -376,7 +392,9 @@ app.get('/api/tournaments/:tId/knockout-bracket', requireAuth, (req, res) => {
       const legs = roundFixtures.filter(f => f.match_number === mn).sort((a,b) => a.leg - b.leg);
       const leg1 = legs.find(f => f.leg === 1);
       const leg2 = legs.find(f => f.leg === 2);
-      const winner = knockoutWinner(leg1, leg2);
+      // Only compute winner if both teams are assigned and both legs played
+      const hasTeams = leg1?.home_team_id && leg1?.away_team_id;
+      const winner = hasTeams ? knockoutWinner(leg1, leg2) : null;
       const aggHome = (leg1?.played && leg2?.played) ? (leg1.home_score + leg2.away_score) : null;
       const aggAway = (leg1?.played && leg2?.played) ? (leg1.away_score + leg2.home_score) : null;
       return {
@@ -385,8 +403,9 @@ app.get('/api/tournaments/:tId/knockout-bracket', requireAuth, (req, res) => {
         leg2: leg2 ? enrichFixture(leg2, tm) : null,
         winner: winner ? { id: winner, name: tm[winner]?.name } : null,
         aggregateHome: aggHome, aggregateAway: aggAway,
-        homeTeam: leg1 && leg1.home_team_id ? { id: leg1.home_team_id, name: tm[leg1.home_team_id]?.name } : null,
-        awayTeam: leg1 && leg1.away_team_id ? { id: leg1.away_team_id, name: tm[leg1.away_team_id]?.name } : null,
+        homeTeam: leg1?.home_team_id ? { id: leg1.home_team_id, name: tm[leg1.home_team_id]?.name } : null,
+        awayTeam: leg1?.away_team_id ? { id: leg1.away_team_id, name: tm[leg1.away_team_id]?.name } : null,
+        isPlaceholder: !hasTeams,
       };
     });
 
