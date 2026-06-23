@@ -13,6 +13,7 @@ app.use(express.json());
 
 // ─── Database ─────────────────────────────────────────────────────────────────
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'football.db');
+// Note: on free hosting without persistent disk, DB resets on redeploy
 const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
