@@ -169,9 +169,9 @@ export default function TournamentsPage({ onSelect }) {
                 <ToggleButtonGroup value={form.num_groups} exclusive fullWidth size="small"
                   onChange={(_,v)=>v&&setForm({...form,num_groups:v})}>
                   {[2,3,4].map(n=>(
-                    <ToggleButton key={n} value={n} sx={{ fontWeight:700, fontSize:12,
+                    <ToggleButton key={n} value={n} disabled={n > 2} sx={{ fontWeight:700, fontSize:12,
                       '&.Mui-selected':{ bgcolor:'rgba(255,152,0,0.15)', color:'#ff9800', borderColor:'rgba(255,152,0,0.4)' } }}>
-                      {n} Groups
+                      {n} Groups{n > 2 ? ' (soon)' : ''}
                     </ToggleButton>
                   ))}
                 </ToggleButtonGroup>

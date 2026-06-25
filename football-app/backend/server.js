@@ -99,6 +99,7 @@ function enrichFixture(f, tm) {
     homeScore: f.home_score, awayScore: f.away_score,
     round: f.round, matchNumber: f.match_number, leg: f.leg,
     fixtureType: f.fixture_type,
+    groupName: f.group_name || null,
     homeTeam: f.home_team_id && tm[f.home_team_id] ? { id: tm[f.home_team_id].id, name: tm[f.home_team_id].name } : null,
     awayTeam: f.away_team_id && tm[f.away_team_id] ? { id: tm[f.away_team_id].id, name: tm[f.away_team_id].name } : null,
   };
