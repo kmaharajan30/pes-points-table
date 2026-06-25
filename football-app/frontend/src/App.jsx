@@ -19,6 +19,7 @@ import TournamentsPage from './pages/TournamentsPage';
 import TeamsPage from './pages/TeamsPage';
 import FixturesPage from './pages/FixturesPage';
 import PointsTablePage from './pages/PointsTablePage';
+import GroupKnockoutPage from './pages/GroupKnockoutPage';
 import ActiveUsers from './components/ActiveUsers';
 
 const DRAWER_WIDTH = 248;
@@ -27,6 +28,11 @@ const NAV_ITEMS = [
   { key: 'teams',    label: 'Teams',   icon: <GroupsRoundedIcon /> },
   { key: 'fixtures', label: 'Fixtures',icon: <SportsSoccerRoundedIcon /> },
   { key: 'table',    label: 'Table',   icon: <LeaderboardRoundedIcon /> },
+];
+
+const NAV_ITEMS_GK = [
+  { key: 'teams',      label: 'Teams',     icon: <GroupsRoundedIcon /> },
+  { key: 'group_ko',   label: 'Tournament',icon: <SportsSoccerRoundedIcon /> },
 ];
 
 function getInitials(name = '') {
@@ -97,7 +103,7 @@ export default function App() {
           </Box>
           <Divider sx={{ borderColor:'rgba(255,255,255,0.06)', mb:1, mx:1.5 }} />
           <List dense sx={{ px:0.75 }}>
-            {NAV_ITEMS.map(item => (
+            {(activeTournament.type === 'group_knockout' ? NAV_ITEMS_GK : NAV_ITEMS).map(item => (
               <ListItem key={item.key} disablePadding>
                 <ListItemButton selected={activeTab===item.key}
                   onClick={()=>{ setActiveTab(item.key); setDrawerOpen(false); }}
@@ -150,6 +156,10 @@ export default function App() {
 
   const renderPage = () => {
     if (!activeTournament) return <TournamentsPage onSelect={handleSelect} />;
+    if (activeTournament.type === 'group_knockout') {
+      if (activeTab === 'teams') return <TeamsPage tournament={activeTournament} />;
+      return <GroupKnockoutPage tournament={activeTournament} />;
+    }
     switch (activeTab) {
       case 'teams':    return <TeamsPage tournament={activeTournament} />;
       case 'fixtures': return <FixturesPage tournament={activeTournament} />;
@@ -254,7 +264,7 @@ export default function App() {
                   backdropFilter:'blur(12px)' }}>
                 <BottomNavigation value={activeTab} onChange={(_,v)=>setActiveTab(v)}
                   sx={{ bgcolor:'transparent', height:58 }}>
-                  {NAV_ITEMS.map(item => (
+                  {(activeTournament.type === 'group_knockout' ? NAV_ITEMS_GK : NAV_ITEMS).map(item => (
                     <BottomNavigationAction key={item.key} value={item.key}
                       label={item.label} icon={item.icon}
                       sx={{

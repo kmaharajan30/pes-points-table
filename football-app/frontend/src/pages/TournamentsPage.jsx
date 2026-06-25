@@ -14,6 +14,7 @@ import ArrowForwardRoundedIcon from '@mui/icons-material/ArrowForwardRounded';
 import CalendarTodayRoundedIcon from '@mui/icons-material/CalendarTodayRounded';
 import SportsSoccerRoundedIcon from '@mui/icons-material/SportsSoccerRounded';
 import AccountTreeRoundedIcon from '@mui/icons-material/AccountTreeRounded';
+import GroupsRoundedIcon from '@mui/icons-material/GroupsRounded';
 import PageHeader from '../components/PageHeader';
 import EmptyState from '../components/EmptyState';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -26,7 +27,7 @@ export default function TournamentsPage({ onSelect }) {
   const [tournaments, setTournaments] = useState([]);
   const [loading, setLoading]         = useState(true);
   const [open, setOpen]               = useState(false);
-  const [form, setForm]               = useState({ name:'', season:'', type:'league' });
+  const [form, setForm]               = useState({ name:'', season:'', type:'league', num_groups: 2 });
   const [deleteTarget, setDeleteTarget] = useState(null);
 
   const load = async () => {
@@ -38,7 +39,7 @@ export default function TournamentsPage({ onSelect }) {
   const handleCreate = async () => {
     if (!form.name.trim()) return;
     await createTournament(form);
-    setForm({ name:'', season:'', type:'league' });
+    setForm({ name:'', season:'', type:'league', num_groups: 2 });
     setOpen(false);
     load();
   };
@@ -102,13 +103,15 @@ export default function TournamentsPage({ onSelect }) {
                       <Chip
                         icon={t.type==='knockout'
                           ? <AccountTreeRoundedIcon sx={{ fontSize:'11px !important' }} />
-                          : <SportsSoccerRoundedIcon sx={{ fontSize:'11px !important' }} />}
-                        label={t.type==='knockout'?'Knockout':'League'}
+                          : t.type==='group_knockout'
+                            ? <GroupsRoundedIcon sx={{ fontSize:'11px !important' }} />
+                            : <SportsSoccerRoundedIcon sx={{ fontSize:'11px !important' }} />}
+                        label={t.type==='knockout'?'Knockout':t.type==='group_knockout'?`Group+KO (${t.numGroups||2}G)`:'League'}
                         size="small"
                         sx={{ fontSize:10, height:20, fontWeight:700,
-                          bgcolor: t.type==='knockout'?'rgba(101,31,255,0.15)':'rgba(0,230,118,0.12)',
-                          color: t.type==='knockout'?'#a255ff':'#00e676',
-                          border:`1px solid ${t.type==='knockout'?'rgba(101,31,255,0.3)':'rgba(0,230,118,0.3)'}` }} />
+                          bgcolor: t.type==='knockout'?'rgba(101,31,255,0.15)':t.type==='group_knockout'?'rgba(255,152,0,0.15)':'rgba(0,230,118,0.12)',
+                          color: t.type==='knockout'?'#a255ff':t.type==='group_knockout'?'#ff9800':'#00e676',
+                          border:`1px solid ${t.type==='knockout'?'rgba(101,31,255,0.3)':t.type==='group_knockout'?'rgba(255,152,0,0.3)':'rgba(0,230,118,0.3)'}` }} />
                     </Box>
                   </CardContent>
                 </CardActionArea>
@@ -148,11 +151,35 @@ export default function TournamentsPage({ onSelect }) {
                 '&.Mui-selected':{ bgcolor:'rgba(101,31,255,0.15)', color:'#a255ff', borderColor:'rgba(101,31,255,0.4)' } }}>
                 <AccountTreeRoundedIcon sx={{ fontSize:16 }} /> Knockout
               </ToggleButton>
+              <ToggleButton value="group_knockout" sx={{ gap:0.75, fontWeight:700, fontSize:11,
+                '&.Mui-selected':{ bgcolor:'rgba(255,152,0,0.15)', color:'#ff9800', borderColor:'rgba(255,152,0,0.4)' } }}>
+                <GroupsRoundedIcon sx={{ fontSize:16 }} /> Group+KO
+              </ToggleButton>
             </ToggleButtonGroup>
             <Typography variant="caption" color="text.secondary" sx={{ mt:0.5, display:'block', fontSize:10 }}>
               {form.type==='league' ? 'Each team plays every other team twice (home & away)'
-                : 'Two-legged knockout — aggregate goals decide the winner'}
+                : form.type==='knockout' ? 'Two-legged knockout — aggregate goals decide the winner'
+                : 'Group stage league → Top 2 per group → Semi-finals (2 legs) + Final (1 match)'}
             </Typography>
+            {form.type==='group_knockout' && (
+              <Box sx={{ mt:1.5 }}>
+                <Typography variant="caption" color="text.secondary" sx={{ mb:0.75, display:'block', fontWeight:600 }}>
+                  Number of Groups
+                </Typography>
+                <ToggleButtonGroup value={form.num_groups} exclusive fullWidth size="small"
+                  onChange={(_,v)=>v&&setForm({...form,num_groups:v})}>
+                  {[2,3,4].map(n=>(
+                    <ToggleButton key={n} value={n} sx={{ fontWeight:700, fontSize:12,
+                      '&.Mui-selected':{ bgcolor:'rgba(255,152,0,0.15)', color:'#ff9800', borderColor:'rgba(255,152,0,0.4)' } }}>
+                      {n} Groups
+                    </ToggleButton>
+                  ))}
+                </ToggleButtonGroup>
+                <Typography variant="caption" color="text.secondary" sx={{ mt:0.5, display:'block', fontSize:10 }}>
+                  Teams will be distributed evenly across {form.num_groups} groups (need ≥ {form.num_groups * 2} teams)
+                </Typography>
+              </Box>
+            )}
           </Box>
         </DialogContent>
         <DialogActions sx={{ px:2.5, pb:2.5, gap:1 }}>
