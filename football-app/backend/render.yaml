@@ -5,13 +5,11 @@ services:
     buildCommand: npm install
     startCommand: npm start
     envVars:
-      - key: DB_PATH
-        value: /data/football.db
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false
       - key: NODE_ENV
         value: production
       - key: CORS_ORIGIN
-        value: https://your-frontend.vercel.app
-    disk:
-      name: football-db
-      mountPath: /data
-      sizeGB: 1
+        value: https://pes-points-table.vercel.app
