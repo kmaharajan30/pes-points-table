@@ -102,6 +102,9 @@ export default function LoginPage({ onLogin }) {
             )}
 
             <form onSubmit={handleSubmit} noValidate autoComplete="off">
+              {/* hidden inputs trick Chrome into not showing the save-password prompt */}
+              <input type="text" name="username" style={{ display:'none' }} readOnly tabIndex={-1} />
+              <input type="password" name="password" style={{ display:'none' }} readOnly tabIndex={-1} />
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
                 <TextField
                   label="Your Name"
@@ -109,7 +112,7 @@ export default function LoginPage({ onLogin }) {
                   autoFocus
                   value={form.name}
                   onChange={e => setForm({ ...form, name: e.target.value })}
-                  inputProps={{ autoComplete: 'off' }}
+                  inputProps={{ autoComplete: 'new-password' }}
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
