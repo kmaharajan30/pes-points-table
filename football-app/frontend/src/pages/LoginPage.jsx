@@ -1,18 +1,15 @@
 import { useState } from 'react';
 import {
   Box, Button, Card, CardContent, CircularProgress,
-  IconButton, InputAdornment, TextField, Typography, Alert, Divider
+  InputAdornment, TextField, Typography, Alert, Divider
 } from '@mui/material';
 import SportsSoccerRoundedIcon from '@mui/icons-material/SportsSoccerRounded';
-import VisibilityRoundedIcon from '@mui/icons-material/VisibilityRounded';
-import VisibilityOffRoundedIcon from '@mui/icons-material/VisibilityOffRounded';
 import LockRoundedIcon from '@mui/icons-material/LockRounded';
 import PersonRoundedIcon from '@mui/icons-material/PersonRounded';
 import { login } from '../api/footballApi';
 
 export default function LoginPage({ onLogin }) {
   const [form, setForm] = useState({ name: '', code: '' });
-  const [showCode, setShowCode] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -124,9 +121,9 @@ export default function LoginPage({ onLogin }) {
                 />
 
                 <TextField
-                  label="Your Code"
+                  label="Group Code"
                   fullWidth
-                  type={showCode ? 'text' : 'password'}
+                  type="text"
                   value={form.code}
                   onChange={e => setForm({ ...form, code: e.target.value })}
                   inputProps={{ minLength: 4, autoComplete: 'new-password' }}
@@ -134,16 +131,6 @@ export default function LoginPage({ onLogin }) {
                     startAdornment: (
                       <InputAdornment position="start">
                         <LockRoundedIcon sx={{ color: 'text.secondary', fontSize: 20 }} />
-                      </InputAdornment>
-                    ),
-                    endAdornment: (
-                      <InputAdornment position="end">
-                        <IconButton onClick={() => setShowCode(v => !v)} edge="end" size="small">
-                          {showCode
-                            ? <VisibilityOffRoundedIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
-                            : <VisibilityRoundedIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
-                          }
-                        </IconButton>
                       </InputAdornment>
                     ),
                   }}
