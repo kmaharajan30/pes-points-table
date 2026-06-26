@@ -1,7 +1,7 @@
 const express = require('express');
 const cors    = require('cors');
 const { v4: uuidv4 } = require('uuid');
-const Database = require('better-sqlite3');
+const DatabaseWrapper = require('./db-wrapper');
 const path     = require('path');
 
 const app = express();
@@ -14,64 +14,9 @@ app.use(express.json());
 // ─── Database ─────────────────────────────────────────────────────────────────
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'football.db');
 // Note: on free hosting without persistent disk, DB resets on redeploy
-const db = new Database(DB_PATH);
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+const db = new DatabaseWrapper(DB_PATH);
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY, name TEXT NOT NULL,
-    code TEXT NOT NULL,  created_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS tournaments (
-    id TEXT PRIMARY KEY, code TEXT NOT NULL,
-    name TEXT NOT NULL,  season TEXT DEFAULT '',
-    type TEXT NOT NULL DEFAULT 'league',
-    num_groups INTEGER DEFAULT 2,
-    legs INTEGER DEFAULT 2,
-    created_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS teams (
-    id TEXT PRIMARY KEY, tournament_id TEXT NOT NULL,
-    name TEXT NOT NULL,
-    group_name TEXT DEFAULT NULL,
-    FOREIGN KEY (tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE
-  );
-  CREATE TABLE IF NOT EXISTS fixtures (
-    id            TEXT PRIMARY KEY,
-    tournament_id TEXT NOT NULL,
-    home_team_id  TEXT,
-    away_team_id  TEXT,
-    date          TEXT,
-    played        INTEGER NOT NULL DEFAULT 0,
-    home_score    INTEGER,
-    away_score    INTEGER,
-    round         INTEGER,
-    match_number  INTEGER,
-    leg           INTEGER DEFAULT 1,
-    fixture_type  TEXT DEFAULT 'league',
-    group_name    TEXT DEFAULT NULL,
-    FOREIGN KEY (tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE
-  );
-  CREATE TABLE IF NOT EXISTS knockout_rounds (
-    id            TEXT PRIMARY KEY,
-    tournament_id TEXT NOT NULL,
-    round         INTEGER NOT NULL,
-    round_name    TEXT NOT NULL,
-    FOREIGN KEY (tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE
-  );
-`);
-
-// Migrate: add type column if not present
-try { db.exec(`ALTER TABLE tournaments ADD COLUMN type TEXT NOT NULL DEFAULT 'league'`); } catch(_) {}
-try { db.exec(`ALTER TABLE tournaments ADD COLUMN num_groups INTEGER DEFAULT 2`); } catch(_) {}
-try { db.exec(`ALTER TABLE tournaments ADD COLUMN legs INTEGER DEFAULT 2`); } catch(_) {}
-try { db.exec(`ALTER TABLE fixtures ADD COLUMN round INTEGER`); } catch(_) {}
-try { db.exec(`ALTER TABLE fixtures ADD COLUMN match_number INTEGER`); } catch(_) {}
-try { db.exec(`ALTER TABLE fixtures ADD COLUMN leg INTEGER DEFAULT 1`); } catch(_) {}
-try { db.exec(`ALTER TABLE fixtures ADD COLUMN fixture_type TEXT DEFAULT 'league'`); } catch(_) {}
-try { db.exec(`ALTER TABLE fixtures ADD COLUMN group_name TEXT DEFAULT NULL`); } catch(_) {}
-try { db.exec(`ALTER TABLE teams ADD COLUMN group_name TEXT DEFAULT NULL`); } catch(_) {}
+// Tables are created in startServer() after db.init()
 
 // ─── Presence ─────────────────────────────────────────────────────────────────
 const presence = new Map();
@@ -718,5 +663,76 @@ app.get('/api/tournaments/:tId/table', requireAuth, (req, res) => {
 });
 
 // ─── Start ────────────────────────────────────────────────────────────────────
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`⚽  Football API on :${PORT}  |  DB: football.db`));
+async function startServer() {
+  await db.init();
+
+  // Create tables
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL,
+      code TEXT NOT NULL,  created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS tournaments (
+      id TEXT PRIMARY KEY, code TEXT NOT NULL,
+      name TEXT NOT NULL,  season TEXT DEFAULT '',
+      type TEXT NOT NULL DEFAULT 'league',
+      num_groups INTEGER DEFAULT 2,
+      legs INTEGER DEFAULT 2,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS teams (
+      id TEXT PRIMARY KEY, tournament_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      group_name TEXT DEFAULT NULL,
+      FOREIGN KEY (tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS fixtures (
+      id            TEXT PRIMARY KEY,
+      tournament_id TEXT NOT NULL,
+      home_team_id  TEXT,
+      away_team_id  TEXT,
+      date          TEXT,
+      played        INTEGER NOT NULL DEFAULT 0,
+      home_score    INTEGER,
+      away_score    INTEGER,
+      round         INTEGER,
+      match_number  INTEGER,
+      leg           INTEGER DEFAULT 1,
+      fixture_type  TEXT DEFAULT 'league',
+      group_name    TEXT DEFAULT NULL,
+      FOREIGN KEY (tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS knockout_rounds (
+      id            TEXT PRIMARY KEY,
+      tournament_id TEXT NOT NULL,
+      round         INTEGER NOT NULL,
+      round_name    TEXT NOT NULL,
+      FOREIGN KEY (tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE
+    );
+  `);
+
+  // Migrations — check if column exists before trying to add
+  const safeAddColumn = (table, column, type) => {
+    try {
+      const cols = db.db.exec(`PRAGMA table_info(${table})`);
+      const colNames = cols.length > 0 ? cols[0].values.map(r => r[1]) : [];
+      if (!colNames.includes(column)) {
+        db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+      }
+    } catch(_) {}
+  };
+  safeAddColumn('tournaments', 'type', "TEXT NOT NULL DEFAULT 'league'");
+  safeAddColumn('tournaments', 'num_groups', 'INTEGER DEFAULT 2');
+  safeAddColumn('tournaments', 'legs', 'INTEGER DEFAULT 2');
+  safeAddColumn('fixtures', 'round', 'INTEGER');
+  safeAddColumn('fixtures', 'match_number', 'INTEGER');
+  safeAddColumn('fixtures', 'leg', 'INTEGER DEFAULT 1');
+  safeAddColumn('fixtures', 'fixture_type', "TEXT DEFAULT 'league'");
+  safeAddColumn('fixtures', 'group_name', 'TEXT DEFAULT NULL');
+  safeAddColumn('teams', 'group_name', 'TEXT DEFAULT NULL');
+
+  const PORT = process.env.PORT || 5000;
+  app.listen(PORT, () => console.log(`⚽  Football API on :${PORT}  |  DB: football.db`));
+}
+
+startServer().catch(err => { console.error('Failed to start:', err); process.exit(1); });
