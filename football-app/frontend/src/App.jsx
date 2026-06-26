@@ -31,8 +31,9 @@ const NAV_ITEMS = [
 ];
 
 const NAV_ITEMS_GK = [
-  { key: 'teams',      label: 'Teams',     icon: <GroupsRoundedIcon /> },
-  { key: 'group_ko',   label: 'Tournament',icon: <SportsSoccerRoundedIcon /> },
+  { key: 'teams',    label: 'Teams',    icon: <GroupsRoundedIcon /> },
+  { key: 'fixtures', label: 'Fixtures', icon: <SportsSoccerRoundedIcon /> },
+  { key: 'table',    label: 'Table',    icon: <LeaderboardRoundedIcon /> },
 ];
 
 function getInitials(name = '') {
@@ -157,8 +158,9 @@ export default function App() {
   const renderPage = () => {
     if (!activeTournament) return <TournamentsPage onSelect={handleSelect} />;
     if (activeTournament.type === 'group_knockout') {
-      if (activeTab === 'teams') return <TeamsPage tournament={activeTournament} />;
-      return <GroupKnockoutPage tournament={activeTournament} />;
+      if (activeTab === 'teams')    return <TeamsPage tournament={activeTournament} />;
+      if (activeTab === 'table')    return <GroupKnockoutPage tournament={activeTournament} view="table" />;
+      return <GroupKnockoutPage tournament={activeTournament} view="fixtures" />;
     }
     switch (activeTab) {
       case 'teams':    return <TeamsPage tournament={activeTournament} />;

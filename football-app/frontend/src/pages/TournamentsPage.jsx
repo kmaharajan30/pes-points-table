@@ -27,7 +27,7 @@ export default function TournamentsPage({ onSelect }) {
   const [tournaments, setTournaments] = useState([]);
   const [loading, setLoading]         = useState(true);
   const [open, setOpen]               = useState(false);
-  const [form, setForm]               = useState({ name:'', season:'', type:'league', num_groups: 2 });
+  const [form, setForm]               = useState({ name:'', season:'', type:'league', num_groups: 2, legs: 2 });
   const [deleteTarget, setDeleteTarget] = useState(null);
 
   const load = async () => {
@@ -39,7 +39,7 @@ export default function TournamentsPage({ onSelect }) {
   const handleCreate = async () => {
     if (!form.name.trim()) return;
     await createTournament(form);
-    setForm({ name:'', season:'', type:'league', num_groups: 2 });
+    setForm({ name:'', season:'', type:'league', num_groups: 2, legs: 2 });
     setOpen(false);
     load();
   };
@@ -161,6 +161,24 @@ export default function TournamentsPage({ onSelect }) {
                 : form.type==='knockout' ? 'Two-legged knockout — aggregate goals decide the winner'
                 : 'Group stage league → Top 2 per group → Semi-finals (2 legs) + Final (1 match)'}
             </Typography>
+            {form.type === 'league' && (
+              <Box sx={{ mt:1.5 }}>
+                <Typography variant="caption" color="text.secondary" sx={{ mb:0.75, display:'block', fontWeight:600 }}>
+                  Legs
+                </Typography>
+                <ToggleButtonGroup value={form.legs} exclusive fullWidth size="small"
+                  onChange={(_,v)=>v&&setForm({...form,legs:v})}>
+                  <ToggleButton value={1} sx={{ fontWeight:700, fontSize:12,
+                    '&.Mui-selected':{ bgcolor:'rgba(0,230,118,0.15)', color:'#00e676', borderColor:'rgba(0,230,118,0.4)' } }}>
+                    1 Leg
+                  </ToggleButton>
+                  <ToggleButton value={2} sx={{ fontWeight:700, fontSize:12,
+                    '&.Mui-selected':{ bgcolor:'rgba(0,230,118,0.15)', color:'#00e676', borderColor:'rgba(0,230,118,0.4)' } }}>
+                    2 Legs (Home &amp; Away)
+                  </ToggleButton>
+                </ToggleButtonGroup>
+              </Box>
+            )}
             {form.type==='group_knockout' && (
               <Box sx={{ mt:1.5 }}>
                 <Typography variant="caption" color="text.secondary" sx={{ mb:0.75, display:'block', fontWeight:600 }}>
@@ -178,6 +196,24 @@ export default function TournamentsPage({ onSelect }) {
                 <Typography variant="caption" color="text.secondary" sx={{ mt:0.5, display:'block', fontSize:10 }}>
                   Teams will be distributed evenly across {form.num_groups} groups (need ≥ {form.num_groups * 2} teams)
                 </Typography>
+              </Box>
+            )}
+            {form.type==='group_knockout' && (
+              <Box sx={{ mt:1.5 }}>
+                <Typography variant="caption" color="text.secondary" sx={{ mb:0.75, display:'block', fontWeight:600 }}>
+                  Group Stage Legs
+                </Typography>
+                <ToggleButtonGroup value={form.legs} exclusive fullWidth size="small"
+                  onChange={(_,v)=>v&&setForm({...form,legs:v})}>
+                  <ToggleButton value={1} sx={{ fontWeight:700, fontSize:12,
+                    '&.Mui-selected':{ bgcolor:'rgba(255,152,0,0.15)', color:'#ff9800', borderColor:'rgba(255,152,0,0.4)' } }}>
+                    1 Leg
+                  </ToggleButton>
+                  <ToggleButton value={2} sx={{ fontWeight:700, fontSize:12,
+                    '&.Mui-selected':{ bgcolor:'rgba(255,152,0,0.15)', color:'#ff9800', borderColor:'rgba(255,152,0,0.4)' } }}>
+                    2 Legs (Home &amp; Away)
+                  </ToggleButton>
+                </ToggleButtonGroup>
               </Box>
             )}
           </Box>

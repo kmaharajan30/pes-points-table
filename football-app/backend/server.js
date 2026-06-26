@@ -28,6 +28,7 @@ db.exec(`
     name TEXT NOT NULL,  season TEXT DEFAULT '',
     type TEXT NOT NULL DEFAULT 'league',
     num_groups INTEGER DEFAULT 2,
+    legs INTEGER DEFAULT 2,
     created_at TEXT NOT NULL
   );
   CREATE TABLE IF NOT EXISTS teams (
@@ -64,6 +65,7 @@ db.exec(`
 // Migrate: add type column if not present
 try { db.exec(`ALTER TABLE tournaments ADD COLUMN type TEXT NOT NULL DEFAULT 'league'`); } catch(_) {}
 try { db.exec(`ALTER TABLE tournaments ADD COLUMN num_groups INTEGER DEFAULT 2`); } catch(_) {}
+try { db.exec(`ALTER TABLE tournaments ADD COLUMN legs INTEGER DEFAULT 2`); } catch(_) {}
 try { db.exec(`ALTER TABLE fixtures ADD COLUMN round INTEGER`); } catch(_) {}
 try { db.exec(`ALTER TABLE fixtures ADD COLUMN match_number INTEGER`); } catch(_) {}
 try { db.exec(`ALTER TABLE fixtures ADD COLUMN leg INTEGER DEFAULT 1`); } catch(_) {}
@@ -145,28 +147,30 @@ function computeGroupTable(tournamentId, groupName) {
 }
 
 // Generate group_knockout: group stage league fixtures per group
-function generateGroupLeagueFixtures(teams, tournamentId) {
+function generateGroupLeagueFixtures(teams, tournamentId, legs=2) {
   const fixtures = [];
   for (let i = 0; i < teams.length; i++) {
     for (let j = i + 1; j < teams.length; j++) {
       fixtures.push({ id: uuidv4(), tournament_id: tournamentId, home_team_id: teams[i].id, away_team_id: teams[j].id, fixture_type: 'group_league', group_name: teams[i].group_name, leg: 1 });
-      fixtures.push({ id: uuidv4(), tournament_id: tournamentId, home_team_id: teams[j].id, away_team_id: teams[i].id, fixture_type: 'group_league', group_name: teams[i].group_name, leg: 2 });
+      if (legs === 2) {
+        fixtures.push({ id: uuidv4(), tournament_id: tournamentId, home_team_id: teams[j].id, away_team_id: teams[i].id, fixture_type: 'group_league', group_name: teams[i].group_name, leg: 2 });
+      }
     }
   }
   return fixtures;
 }
 
-// Generate group_knockout: semi-finals (2 legs) + final (1 leg) placeholder
+// Generate group_knockout: semi-finals (always 2 legs) + final (1 leg) placeholder
 // SF1: 1st GroupA vs 2nd GroupB, SF2: 1st GroupB vs 2nd GroupA
 function generateGroupKnockoutStage(tournamentId) {
   const fixtures = [];
-  // Semi-Final 1: match_number=1
+  // Semi-Final 1: match_number=1 — always 2 legs
   fixtures.push({ id: uuidv4(), tournament_id: tournamentId, home_team_id: null, away_team_id: null, fixture_type: 'knockout', round: 1, match_number: 1, leg: 1, group_name: null });
   fixtures.push({ id: uuidv4(), tournament_id: tournamentId, home_team_id: null, away_team_id: null, fixture_type: 'knockout', round: 1, match_number: 1, leg: 2, group_name: null });
-  // Semi-Final 2: match_number=2
+  // Semi-Final 2: match_number=2 — always 2 legs
   fixtures.push({ id: uuidv4(), tournament_id: tournamentId, home_team_id: null, away_team_id: null, fixture_type: 'knockout', round: 1, match_number: 2, leg: 1, group_name: null });
   fixtures.push({ id: uuidv4(), tournament_id: tournamentId, home_team_id: null, away_team_id: null, fixture_type: 'knockout', round: 1, match_number: 2, leg: 2, group_name: null });
-  // Final: match_number=1, single leg
+  // Final: match_number=1, single leg always
   fixtures.push({ id: uuidv4(), tournament_id: tournamentId, home_team_id: null, away_team_id: null, fixture_type: 'knockout', round: 2, match_number: 1, leg: 1, group_name: null });
   return fixtures;
 }
@@ -181,15 +185,15 @@ function roundName(bracketSize, round) {
   return `Round ${round}`;
 }
 
-// Generate league fixtures: each team plays every other twice (home & away)
-function generateLeagueFixtures(teams, tournamentId) {
+// Generate league fixtures: each team plays every other (1 or 2 legs)
+function generateLeagueFixtures(teams, tournamentId, legs=2) {
   const fixtures = [];
   for (let i = 0; i < teams.length; i++) {
     for (let j = i + 1; j < teams.length; j++) {
-      // Leg 1
       fixtures.push({ id: uuidv4(), tournament_id: tournamentId, home_team_id: teams[i].id, away_team_id: teams[j].id, fixture_type: 'league', leg: 1 });
-      // Leg 2 (reversed home/away)
-      fixtures.push({ id: uuidv4(), tournament_id: tournamentId, home_team_id: teams[j].id, away_team_id: teams[i].id, fixture_type: 'league', leg: 2 });
+      if (legs === 2) {
+        fixtures.push({ id: uuidv4(), tournament_id: tournamentId, home_team_id: teams[j].id, away_team_id: teams[i].id, fixture_type: 'league', leg: 2 });
+      }
     }
   }
   return fixtures;
@@ -288,17 +292,18 @@ app.get('/api/presence/:code', requireAuth, (req, res) => {
 // ─── Tournaments ──────────────────────────────────────────────────────────────
 app.get('/api/tournaments', requireAuth, (req, res) => {
   res.json(db.prepare('SELECT * FROM tournaments WHERE code=? ORDER BY created_at DESC').all(req.user.code)
-    .map(r => ({ id:r.id, name:r.name, season:r.season, type:r.type, numGroups:r.num_groups, createdAt:r.created_at })));
+    .map(r => ({ id:r.id, name:r.name, season:r.season, type:r.type, numGroups:r.num_groups, legs:r.legs, createdAt:r.created_at })));
 });
 
 app.post('/api/tournaments', requireAuth, (req, res) => {
-  const { name, season, type='league', num_groups=2 } = req.body;
+  const { name, season, type='league', num_groups=2, legs=2 } = req.body;
   if (!name) return res.status(400).json({ error: 'Name required' });
   if (!['league','knockout','group_knockout'].includes(type)) return res.status(400).json({ error: 'type must be league, knockout, or group_knockout' });
   const numGroups = type === 'group_knockout' ? Math.max(2, parseInt(num_groups)||2) : null;
-  const t = { id:uuidv4(), code:req.user.code, name:name.trim(), season:season||'', type, num_groups:numGroups, created_at:new Date().toISOString() };
-  db.prepare('INSERT INTO tournaments (id,code,name,season,type,num_groups,created_at) VALUES (?,?,?,?,?,?,?)').run(t.id,t.code,t.name,t.season,t.type,t.num_groups,t.created_at);
-  res.status(201).json({ id:t.id, name:t.name, season:t.season, type:t.type, numGroups:t.num_groups, createdAt:t.created_at });
+  const numLegs   = type === 'group_knockout' ? (parseInt(legs)===1 ? 1 : 2) : (type === 'league' ? (parseInt(legs)===1 ? 1 : 2) : null);
+  const t = { id:uuidv4(), code:req.user.code, name:name.trim(), season:season||'', type, num_groups:numGroups, legs:numLegs, created_at:new Date().toISOString() };
+  db.prepare('INSERT INTO tournaments (id,code,name,season,type,num_groups,legs,created_at) VALUES (?,?,?,?,?,?,?,?)').run(t.id,t.code,t.name,t.season,t.type,t.num_groups,t.legs,t.created_at);
+  res.status(201).json({ id:t.id, name:t.name, season:t.season, type:t.type, numGroups:t.num_groups, legs:t.legs, createdAt:t.created_at });
 });
 
 app.delete('/api/tournaments/:id', requireAuth, (req, res) => {
@@ -323,6 +328,15 @@ app.post('/api/tournaments/:tId/teams', requireAuth, (req, res) => {
   res.status(201).json({ id:team.id, name:team.name, tournamentId:team.tournament_id });
 });
 
+app.put('/api/tournaments/:tId/teams/:teamId', requireAuth, (req, res) => {
+  const { name } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ error: 'Name required' });
+  const team = db.prepare('SELECT * FROM teams WHERE id=? AND tournament_id=?').get(req.params.teamId, req.params.tId);
+  if (!team) return res.status(404).json({ error: 'Team not found' });
+  db.prepare('UPDATE teams SET name=? WHERE id=?').run(name.trim(), req.params.teamId);
+  res.json({ id: req.params.teamId, name: name.trim(), tournamentId: req.params.tId });
+});
+
 app.delete('/api/tournaments/:tId/teams/:teamId', requireAuth, (req, res) => {
   const { teamId } = req.params;
   // Delete all fixtures where this team is home OR away (cascade not on team columns)
@@ -339,6 +353,14 @@ app.post('/api/tournaments/:tId/generate-fixtures', requireAuth, (req, res) => {
   const teams = db.prepare('SELECT * FROM teams WHERE tournament_id=?').all(req.params.tId);
   if (teams.length < 2) return res.status(400).json({ error: 'Need at least 2 teams' });
   if (t.type === 'knockout' && teams.length < 2) return res.status(400).json({ error: 'Need at least 2 teams' });
+
+  // For group_knockout: read legs from request body (sent from frontend using tournament.legs)
+  let overrideLegs = null;
+  if (t.type === 'group_knockout') {
+    const bodyLegs = Number(req.body?.legs);
+    overrideLegs = (Number.isFinite(bodyLegs) && bodyLegs === 1) ? 1 : 2;
+    db.prepare('UPDATE tournaments SET legs=? WHERE id=?').run(overrideLegs, req.params.tId);
+  }
 
   // Clear existing fixtures
   db.prepare('DELETE FROM fixtures WHERE tournament_id=?').run(req.params.tId);
@@ -364,6 +386,9 @@ app.post('/api/tournaments/:tId/generate-fixtures', requireAuth, (req, res) => {
     const numGroups = t.num_groups || 2;
     if (teams.length < numGroups * 2) return res.status(400).json({ error: `Need at least ${numGroups * 2} teams for ${numGroups} groups` });
 
+    // Use override legs if provided in request body, otherwise fall back to stored value
+    const legsToUse = overrideLegs !== null ? overrideLegs : (t.legs || 2);
+
     // Distribute teams round-robin into groups
     const groupLetters = Array.from({length: numGroups}, (_, i) => String.fromCharCode(65 + i)); // A, B, C...
     const shuffled = [...teams];
@@ -381,10 +406,10 @@ app.post('/api/tournaments/:tId/generate-fixtures', requireAuth, (req, res) => {
     const allGroupFixtures = [];
     for (const grp of groupLetters) {
       const grpTeams = shuffled.filter(t => t.group_name === grp);
-      allGroupFixtures.push(...generateGroupLeagueFixtures(grpTeams, req.params.tId));
+      allGroupFixtures.push(...generateGroupLeagueFixtures(grpTeams, req.params.tId, legsToUse));
     }
 
-    // Generate knockout stage placeholders (semis + final)
+    // Generate knockout stage placeholders (semis always 2 legs, final 1 leg)
     const knockoutFixtures = generateGroupKnockoutStage(req.params.tId);
 
     db.transaction(() => {
@@ -396,7 +421,7 @@ app.post('/api/tournaments/:tId/generate-fixtures', requireAuth, (req, res) => {
     db.prepare('INSERT INTO knockout_rounds (id,tournament_id,round,round_name) VALUES (?,?,?,?)').run(uuidv4(), req.params.tId, 1, 'Semi-Final');
     db.prepare('INSERT INTO knockout_rounds (id,tournament_id,round,round_name) VALUES (?,?,?,?)').run(uuidv4(), req.params.tId, 2, 'Final');
 
-    res.json({ message: `Generated group stage + knockout`, groupCount: numGroups, groupFixtures: allGroupFixtures.length, knockoutFixtures: knockoutFixtures.length });
+    res.json({ message: `Generated group stage + knockout`, groupCount: numGroups, groupFixtures: allGroupFixtures.length, knockoutFixtures: knockoutFixtures.length, legs: legsToUse });
   }
 });
 
@@ -607,7 +632,6 @@ app.post('/api/tournaments/:tId/seed-final', requireAuth, (req, res) => {
   const t = db.prepare('SELECT * FROM tournaments WHERE id=? AND code=?').get(req.params.tId, req.user.code);
   if (!t || t.type !== 'group_knockout') return res.status(400).json({ error: 'Not a group_knockout tournament' });
 
-  const numGroups = t.num_groups || 2;
   const sfFixtures = db.prepare('SELECT * FROM fixtures WHERE tournament_id=? AND fixture_type=? AND round=1 ORDER BY match_number,leg').all(req.params.tId, 'knockout');
   const matchNums = [...new Set(sfFixtures.map(f => f.match_number))];
 
@@ -616,6 +640,7 @@ app.post('/api/tournaments/:tId/seed-final', requireAuth, (req, res) => {
     const legs = sfFixtures.filter(f => f.match_number === mn);
     const leg1 = legs.find(f => f.leg === 1);
     const leg2 = legs.find(f => f.leg === 2);
+    // Semi-finals are always 2 legs
     if (!leg1?.played || !leg2?.played) return res.status(400).json({ error: `Semi-final ${mn} is not complete` });
     const winner = knockoutWinner(leg1, leg2);
     if (!winner) return res.status(400).json({ error: `Could not determine winner of semi-final ${mn}` });
@@ -643,12 +668,12 @@ app.get('/api/tournaments/:tId/group-knockout-bracket', requireAuth, (req, res) 
   const bracket = rounds.map(r => {
     const roundFixtures = allKoFixtures.filter(f => f.round === r.round);
     const matchNums = [...new Set(roundFixtures.map(f => f.match_number))];
-    const isFinalRound = r.round_name === 'Final';
+    const isFinalRound = r.round_name === 'Final'; // Final is always single leg; semis always 2 legs
 
     const matches = matchNums.map(mn => {
       const legs = roundFixtures.filter(f => f.match_number === mn).sort((a,b) => a.leg - b.leg);
       const leg1 = legs[0];
-      const leg2 = isFinalRound ? null : legs[1]; // Final is single leg
+      const leg2 = isFinalRound ? null : legs[1]; // Final = single leg, semis = 2 legs
       const hasTeams = leg1?.home_team_id && leg1?.away_team_id;
 
       let winner = null;
@@ -658,7 +683,7 @@ app.get('/api/tournaments/:tId/group-knockout-bracket', requireAuth, (req, res) 
         if (leg1.played) {
           winner = leg1.home_score > leg1.away_score ? leg1.home_team_id
             : leg1.away_score > leg1.home_score ? leg1.away_team_id
-            : null; // draw in final — no winner yet (could add ET/pens)
+            : null;
         }
       } else if (hasTeams && leg1 && leg2) {
         winner = knockoutWinner(leg1, leg2);
