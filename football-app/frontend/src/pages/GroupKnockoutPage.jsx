@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   Box, Typography, Card, CardContent, Chip, Stack,
-  Button, Alert, Skeleton, Avatar, IconButton
+  Button, Alert, Avatar, IconButton
 } from '@mui/material';
 import EmojiEventsRoundedIcon from '@mui/icons-material/EmojiEventsRounded';
 import AccountTreeRoundedIcon from '@mui/icons-material/AccountTreeRounded';
@@ -13,6 +13,7 @@ import SportsSoccerRoundedIcon from '@mui/icons-material/SportsSoccerRounded';
 import TrendingUpRoundedIcon from '@mui/icons-material/TrendingUpRounded';
 import PageHeader from '../components/PageHeader';
 import ConfirmDialog from '../components/ConfirmDialog';
+import LoadingState from '../components/LoadingState';
 import {
   getGroupTables, getGroupFixtures, getGroupKnockout,
   generateFixtures, seedKnockout, seedFinal,
@@ -353,7 +354,7 @@ function TableView({ tournament, groupTables, loading, error, setError }) {
       {error && <Alert severity="error" sx={{ mb:2, borderRadius:2 }} onClose={()=>setError('')}>{error}</Alert>}
 
       {loading ? (
-        <Stack spacing={2}>{[1,2].map(n=><Skeleton key={n} variant="rectangular" height={200} sx={{ borderRadius:2.5 }} />)}</Stack>
+        <LoadingState variant="rows" count={4} />
       ) : groupTables.length === 0 ? (
         <Box sx={{ textAlign:'center', py:6 }}>
           <Typography sx={{ fontSize:40, mb:1 }}>📊</Typography>
@@ -496,7 +497,7 @@ export default function GroupKnockoutPage({ tournament, view = 'fixtures' }) {
       </Box>
 
       {loading ? (
-        <Stack spacing={2}>{[1,2,3].map(n=><Skeleton key={n} variant="rectangular" height={80} sx={{ borderRadius:2 }} />)}</Stack>
+        <LoadingState variant="rows" count={4} />
       ) : (
         <Box>
           {/* ── Group Fixtures ── */}

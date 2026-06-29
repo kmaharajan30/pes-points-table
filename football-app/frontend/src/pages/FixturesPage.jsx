@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   Box, Button, Card, CardContent, Chip, Dialog, DialogActions,
-  DialogContent, DialogTitle, IconButton, Skeleton,
+  DialogContent, DialogTitle, IconButton,
   TextField, Tooltip, Typography, MenuItem, Select,
   FormControl, InputLabel, Stack, Alert, useMediaQuery
 } from '@mui/material';
@@ -17,6 +17,7 @@ import EmojiEventsRoundedIcon from '@mui/icons-material/EmojiEventsRounded';
 import PageHeader from '../components/PageHeader';
 import EmptyState from '../components/EmptyState';
 import ConfirmDialog from '../components/ConfirmDialog';
+import LoadingState from '../components/LoadingState';
 import {
   getFixtures, createFixture, addResult, deleteFixture,
   getTeams, generateFixtures, knockoutAdvance, getKnockoutBracket
@@ -584,9 +585,7 @@ export default function FixturesPage({ tournament }) {
       )}
 
       {loading ? (
-        <Stack spacing={2}>
-          {[1,2,3].map(n=><Skeleton key={n} variant="rectangular" height={90} sx={{ borderRadius:3 }} />)}
-        </Stack>
+        <LoadingState variant="rows" count={4} />
       ) : isKnockout ? (
         <KnockoutBracket
           tournament={tournament} teams={teams} bracket={bracket}

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   Box, Button, Card, CardContent, CardActionArea,
   Dialog, DialogTitle, DialogContent, DialogActions,
-  TextField, Typography, Grid, Chip, Skeleton,
+  TextField, Typography, Grid, Chip,
   IconButton, Tooltip, ToggleButton, ToggleButtonGroup,
   useMediaQuery
 } from '@mui/material';
@@ -18,6 +18,7 @@ import GroupsRoundedIcon from '@mui/icons-material/GroupsRounded';
 import PageHeader from '../components/PageHeader';
 import EmptyState from '../components/EmptyState';
 import ConfirmDialog from '../components/ConfirmDialog';
+import LoadingState from '../components/LoadingState';
 import { getTournaments, createTournament, deleteTournament } from '../api/footballApi';
 
 export default function TournamentsPage({ onSelect }) {
@@ -66,13 +67,7 @@ export default function TournamentsPage({ onSelect }) {
       />
 
       {loading ? (
-        <Grid container spacing={1.5}>
-          {[1,2,3].map(n=>(
-            <Grid item xs={12} sm={6} md={4} key={n}>
-              <Skeleton variant="rectangular" height={120} sx={{ borderRadius:2.5 }} />
-            </Grid>
-          ))}
-        </Grid>
+        <LoadingState variant="cards" count={6} />
       ) : tournaments.length===0 ? (
         <EmptyState icon="🏟️" title="No tournaments yet" subtitle="Create your first tournament to get started" />
       ) : (

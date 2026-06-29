@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   Box, Button, Dialog, DialogTitle, DialogContent, DialogActions,
-  TextField, Typography, Skeleton, IconButton, useMediaQuery
+  TextField, Typography, IconButton, useMediaQuery
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import AddRoundedIcon from '@mui/icons-material/AddRounded';
@@ -11,6 +11,7 @@ import GroupsRoundedIcon from '@mui/icons-material/GroupsRounded';
 import PageHeader from '../components/PageHeader';
 import EmptyState from '../components/EmptyState';
 import ConfirmDialog from '../components/ConfirmDialog';
+import LoadingState from '../components/LoadingState';
 import { getTeams, createTeam, renameTeam, deleteTeam } from '../api/footballApi';
 
 const PALETTE = ['#00e676','#651fff','#ff5252','#ffd740','#40c4ff','#ff6e40','#b2ff59','#e040fb','#64ffda','#ff4081'];
@@ -172,11 +173,7 @@ export default function TeamsPage({ tournament }) {
       />
 
       {loading ? (
-        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 1.5 }}>
-          {[1,2,3,4,5,6].map(n => (
-            <Skeleton key={n} variant="rectangular" height={148} sx={{ borderRadius: '18px' }} />
-          ))}
-        </Box>
+        <LoadingState variant="cards" count={6} />
       ) : teams.length === 0 ? (
         <EmptyState icon={<GroupsRoundedIcon sx={{ fontSize: 48 }} />}
           title="No teams yet" subtitle="Add teams before creating fixtures" />

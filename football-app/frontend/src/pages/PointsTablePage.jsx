@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Box, Card, Chip, Skeleton, Stack, Typography, Avatar } from '@mui/material';
+import { Box, Card, Chip, Stack, Typography, Avatar } from '@mui/material';
 import EmojiEventsRoundedIcon from '@mui/icons-material/EmojiEventsRounded';
 import TrendingUpRoundedIcon from '@mui/icons-material/TrendingUpRounded';
 import PageHeader from '../components/PageHeader';
 import EmptyState from '../components/EmptyState';
+import LoadingState from '../components/LoadingState';
 import { getTable } from '../api/footballApi';
 
 const COLORS = ['#00e676','#651fff','#ff5252','#ffd740','#40c4ff','#ff6e40','#b2ff59','#e040fb','#64ffda','#ff4081'];
@@ -193,11 +194,7 @@ export default function PointsTablePage({ tournament }) {
       />
 
       {loading ? (
-        <Stack spacing={1}>
-          {[1,2,3,4].map(n => (
-            <Skeleton key={n} variant="rectangular" height={56} sx={{ borderRadius: 2 }} />
-          ))}
-        </Stack>
+        <LoadingState variant="rows" count={5} />
       ) : table.length === 0 ? (
         <EmptyState icon="📊" title="No standings yet"
           subtitle="Add teams and play fixtures to see the table" />
