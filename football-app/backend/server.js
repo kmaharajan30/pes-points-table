@@ -203,7 +203,7 @@ app.post('/api/auth/login', async (req, res) => {
     const { name, code } = req.body;
     if (!name || !code) return res.status(400).json({ error: 'Name and code required' });
     if (code.trim().length < 4) return res.status(400).json({ error: 'Code must be ≥ 4 characters' });
-    const [n, c] = [name.trim(), code.trim()];
+    const [n, c] = [name.trim().toLowerCase(), code.trim()];
     const existing = await db.execute({ sql: 'SELECT * FROM users WHERE code=? AND LOWER(name)=LOWER(?)', args: [c, n] });
     if (existing.rows.length > 0) {
       const u = existing.rows[0];
@@ -252,6 +252,9 @@ app.post('/api/tournaments', requireAuth, async (req, res) => {
     const { name, season, type='league', num_groups=2, legs=2 } = req.body;
     if (!name) return res.status(400).json({ error: 'Name required' });
     if (!['league','knockout','group_knockout'].includes(type)) return res.status(400).json({ error: 'type must be league, knockout, or group_knockout' });
+    // Prevent duplicate tournament names (case-insensitive) within same group
+    const dupCheck = await db.execute({ sql: 'SELECT id FROM tournaments WHERE code=? AND LOWER(name)=LOWER(?)', args: [req.user.code, name.trim()] });
+    if (dupCheck.rows.length > 0) return res.status(400).json({ error: 'Tournament with this name already exists' });
     const numGroups = type === 'group_knockout' ? Math.max(2, parseInt(num_groups)||2) : null;
     const numLegs   = type === 'group_knockout' ? (parseInt(legs)===1 ? 1 : 2) : (type === 'league' ? (parseInt(legs)===1 ? 1 : 2) : null);
     const t = { id:uuidv4(), code:req.user.code, name:name.trim(), season:season||'', type, num_groups:numGroups, legs:numLegs, created_at:new Date().toISOString() };
@@ -283,6 +286,9 @@ app.post('/api/tournaments/:tId/teams', requireAuth, async (req, res) => {
     if (!name) return res.status(400).json({ error: 'Name required' });
     const tCheck = await db.execute({ sql: 'SELECT id FROM tournaments WHERE id=? AND code=?', args: [req.params.tId, req.user.code] });
     if (tCheck.rows.length === 0) return res.status(404).json({ error: 'Tournament not found' });
+    // Prevent duplicate team names (case-insensitive)
+    const dupCheck = await db.execute({ sql: 'SELECT id FROM teams WHERE tournament_id=? AND LOWER(name)=LOWER(?)', args: [req.params.tId, name.trim()] });
+    if (dupCheck.rows.length > 0) return res.status(400).json({ error: 'Team with this name already exists' });
     const team = { id:uuidv4(), tournament_id:req.params.tId, name:name.trim() };
     await db.execute({ sql: 'INSERT INTO teams (id,tournament_id,name) VALUES (?,?,?)', args: [team.id, team.tournament_id, team.name] });
     res.status(201).json({ id:team.id, name:team.name, tournamentId:team.tournament_id });
