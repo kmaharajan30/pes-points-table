@@ -5,7 +5,7 @@ import {
   TextField, Typography, IconButton, Tooltip, ToggleButton, ToggleButtonGroup,
   useMediaQuery
 } from '@mui/material';
-import { useTheme } from '@mui/material/styles';
+import { useTheme, keyframes } from '@mui/material/styles';
 import AddRoundedIcon from '@mui/icons-material/AddRounded';
 import EmojiEventsRoundedIcon from '@mui/icons-material/EmojiEventsRounded';
 import DeleteOutlineRoundedIcon from '@mui/icons-material/DeleteOutlineRounded';
@@ -18,6 +18,21 @@ import EmptyState from '../components/EmptyState';
 import ConfirmDialog from '../components/ConfirmDialog';
 import LoadingState from '../components/LoadingState';
 import { getTournaments, createTournament, deleteTournament } from '../api/footballApi';
+
+const goldShimmer = keyframes`
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+`;
+
+const crownBounce = keyframes`
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-2px) scale(1.1); }
+`;
+
+const starTwinkle = keyframes`
+  0%, 100% { opacity: 0.3; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.2); }
+`;
 
 export default function TournamentsPage({ onSelect }) {
   const theme = useTheme();
@@ -83,46 +98,81 @@ export default function TournamentsPage({ onSelect }) {
                 '&:hover':{ transform:{ xs:'none', sm:'translateY(-2px)' }, boxShadow:`0 8px 24px ${typeBg}`, borderColor:`rgba(255,255,255,0.1)` }
               }}>
                 <CardActionArea onClick={()=>onSelect(t)}>
-                  <CardContent sx={{ p:{ xs:2, sm:2.5 }, '&:last-child':{ pb:{ xs:2, sm:2.5 } } }}>
-                    <Box sx={{ display:'flex', alignItems:'center', gap:{ xs:1.5, sm:2 } }}>
-                      {/* Icon */}
-                      <Box sx={{
-                        width:{ xs:44, sm:48 }, height:{ xs:44, sm:48 }, borderRadius:2.5,
-                        background:`linear-gradient(135deg, ${typeColor}22, ${typeColor}44)`,
-                        border:`1px solid ${typeColor}33`,
-                        display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0
-                      }}>
-                        <EmojiEventsRoundedIcon sx={{ color:typeColor, fontSize:{ xs:22, sm:24 } }} />
-                      </Box>
-
-                      {/* Content */}
-                      <Box sx={{ flex:1, minWidth:0 }}>
-                        <Typography noWrap sx={{ fontWeight:700, fontSize:{ xs:14, sm:16 }, lineHeight:1.3, color:'#fff' }}>
-                          {t.name}
-                        </Typography>
-                        <Box sx={{ display:'flex', alignItems:'center', gap:0.75, mt:0.5 }}>
-                          <TypeIcon sx={{ fontSize:12, color:typeColor }} />
-                          <Typography sx={{ fontSize:{ xs:11, sm:12 }, color:typeColor, fontWeight:600 }}>
-                            {typeLabel}
+                  <CardContent sx={{ p:{ xs:1.5, sm:2.5 }, '&:last-child':{ pb:{ xs:1.5, sm:2.5 } } }}>
+                    <Box sx={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                      {/* Left: Icon + Info */}
+                      <Box sx={{ display:'flex', alignItems:'center', gap:{ xs:1.25, sm:1.5 }, minWidth:0 }}>
+                        <Box sx={{
+                          width:{ xs:40, sm:44 }, height:{ xs:40, sm:44 }, borderRadius:2,
+                          background:`linear-gradient(135deg, ${typeColor}22, ${typeColor}44)`,
+                          border:`1px solid ${typeColor}33`,
+                          display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0
+                        }}>
+                          <EmojiEventsRoundedIcon sx={{ color:typeColor, fontSize:{ xs:20, sm:22 } }} />
+                        </Box>
+                        <Box sx={{ minWidth:0 }}>
+                          <Typography noWrap sx={{ fontWeight:700, fontSize:{ xs:13, sm:15 }, color:'#fff' }}>
+                            {t.name}
                           </Typography>
-                          {t.season && (
-                            <>
-                              <Box sx={{ width:3, height:3, borderRadius:'50%', bgcolor:'rgba(255,255,255,0.3)' }} />
-                              <Typography sx={{ fontSize:{ xs:11, sm:12 }, color:'text.secondary' }}>
-                                {t.season}
-                              </Typography>
-                            </>
-                          )}
+                          <Box sx={{ display:'flex', alignItems:'center', gap:0.5, mt:0.25 }}>
+                            <TypeIcon sx={{ fontSize:11, color:typeColor }} />
+                            <Typography sx={{ fontSize:{ xs:10, sm:11 }, color:typeColor, fontWeight:600 }}>
+                              {typeLabel}
+                            </Typography>
+                            {t.season && (
+                              <>
+                                <Box sx={{ width:2.5, height:2.5, borderRadius:'50%', bgcolor:'rgba(255,255,255,0.25)' }} />
+                                <Typography sx={{ fontSize:{ xs:10, sm:11 }, color:'text.secondary' }}>{t.season}</Typography>
+                              </>
+                            )}
+                          </Box>
                         </Box>
                       </Box>
 
-                      {/* Actions */}
+                      {/* Center: Winner Trophy */}
+                      {t.winner && (
+                        <Box sx={{ display:'flex', alignItems:'center', gap:{ xs:0.75, sm:1 },
+                          px:{ xs:1.25, sm:2 }, py:{ xs:0.5, sm:0.6 },
+                          borderRadius:10,
+                          background:'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #1a1a2e 100%)',
+                          border:'1px solid rgba(255,215,0,0.3)',
+                          boxShadow:'0 2px 12px rgba(255,215,0,0.15), inset 0 1px 0 rgba(255,215,0,0.1)',
+                          position:'relative', overflow:'hidden' }}>
+                          {/* Animated gold shimmer streak */}
+                          <Box sx={{ position:'absolute', inset:0,
+                            background:'linear-gradient(90deg, transparent 0%, rgba(255,215,0,0.12) 20%, rgba(255,255,255,0.08) 50%, rgba(255,215,0,0.12) 80%, transparent 100%)',
+                            backgroundSize:'200% 100%',
+                            animation:`${goldShimmer} 2.5s ease-in-out infinite` }} />
+                          {/* Star accents */}
+                          <Box sx={{ position:'absolute', top:3, left:12, fontSize:7, color:'rgba(255,215,0,0.6)',
+                            animation:`${starTwinkle} 2s ease-in-out infinite` }}>✦</Box>
+                          <Box sx={{ position:'absolute', bottom:3, right:14, fontSize:6, color:'rgba(255,215,0,0.5)',
+                            animation:`${starTwinkle} 2.5s ease-in-out infinite`, animationDelay:'0.8s' }}>✦</Box>
+                          {/* Crown + Trophy */}
+                          <Box sx={{ position:'relative', display:'flex', flexDirection:'column', alignItems:'center' }}>
+                            <Typography sx={{ fontSize:{ xs:6, sm:7 }, lineHeight:1, mb:'-2px',
+                              animation:`${crownBounce} 2s ease-in-out infinite`, color:'#ffd700' }}>👑</Typography>
+                            <Typography sx={{ fontSize:{ xs:14, sm:17 }, lineHeight:1, position:'relative',
+                              filter:'drop-shadow(0 2px 4px rgba(255,215,0,0.4))' }}>🏆</Typography>
+                          </Box>
+                          {/* Winner name */}
+                          <Typography sx={{ fontSize:{ xs:11, sm:13 }, fontWeight:900, letterSpacing:0.5,
+                            background:'linear-gradient(180deg, #fff8dc 0%, #ffd700 40%, #daa520 100%)',
+                            WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent',
+                            backgroundClip:'text', position:'relative',
+                            textTransform:'uppercase' }}>
+                            {t.winner}
+                          </Typography>
+                        </Box>
+                      )}
+
+                      {/* Right: Actions */}
                       <Box sx={{ display:'flex', alignItems:'center', gap:0.5, flexShrink:0 }}>
                         <IconButton size="small" onClick={e=>{ e.stopPropagation(); setDeleteTarget(t); }}
-                          sx={{ color:'rgba(255,82,82,0.7)', p:0.75, '&:hover':{ bgcolor:'rgba(255,82,82,0.1)', color:'#ff5252' } }}>
-                          <DeleteOutlineRoundedIcon sx={{ fontSize:{ xs:18, sm:20 } }} />
+                          sx={{ color:'rgba(255,82,82,0.6)', p:0.5, '&:hover':{ bgcolor:'rgba(255,82,82,0.1)', color:'#ff5252' } }}>
+                          <DeleteOutlineRoundedIcon sx={{ fontSize:{ xs:17, sm:19 } }} />
                         </IconButton>
-                        <ArrowForwardRoundedIcon sx={{ color:'rgba(255,255,255,0.3)', fontSize:{ xs:18, sm:20 } }} />
+                        <ArrowForwardRoundedIcon sx={{ color:'rgba(255,255,255,0.25)', fontSize:{ xs:17, sm:19 } }} />
                       </Box>
                     </Box>
                   </CardContent>

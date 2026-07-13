@@ -244,7 +244,57 @@ app.get('/api/presence/:code', requireAuth, (req, res) => {
 app.get('/api/tournaments', requireAuth, async (req, res) => {
   try {
     const result = await db.execute({ sql: 'SELECT * FROM tournaments WHERE code=? ORDER BY created_at DESC', args: [req.user.code] });
-    res.json(result.rows.map(r => ({ id:r.id, name:r.name, season:r.season, type:r.type, numGroups:r.num_groups, legs:r.legs, createdAt:r.created_at })));
+    const tournaments = await Promise.all(result.rows.map(async (r) => {
+      let winner = null;
+      try {
+        if (r.type === 'league') {
+          // League winner = top of the table (must have played at least 1 match)
+          const table = await computeTable(r.id);
+          if (table.length > 0 && table[0].mp > 0) {
+            const allDone = await db.execute({ sql: 'SELECT COUNT(*) as c FROM fixtures WHERE tournament_id=? AND fixture_type=? AND played=0', args: [r.id, 'league'] });
+            if (allDone.rows[0].c === 0) winner = table[0].name;
+          }
+        } else if (r.type === 'knockout') {
+          // Knockout winner = winner of the final round
+          const roundsRes = await db.execute({ sql: 'SELECT MAX(round) as r FROM fixtures WHERE tournament_id=? AND fixture_type=?', args: [r.id, 'knockout'] });
+          const maxRound = roundsRes.rows[0]?.r;
+          if (maxRound) {
+            const finalFix = await db.execute({ sql: 'SELECT * FROM fixtures WHERE tournament_id=? AND fixture_type=? AND round=? ORDER BY leg', args: [r.id, 'knockout', maxRound] });
+            const legs = finalFix.rows;
+            const leg1 = legs.find(f => f.leg === 1);
+            const leg2 = legs.find(f => f.leg === 2);
+            const winnerId = knockoutWinner(leg1, leg2);
+            if (winnerId) {
+              const teamRes = await db.execute({ sql: 'SELECT name FROM teams WHERE id=?', args: [winnerId] });
+              if (teamRes.rows.length > 0) winner = teamRes.rows[0].name;
+            }
+          }
+        } else if (r.type === 'group_knockout') {
+          // Group+KO winner = winner of the Final match
+          const finalFix = await db.execute({ sql: 'SELECT * FROM fixtures WHERE tournament_id=? AND fixture_type=? ORDER BY round DESC, match_number, leg LIMIT 2', args: [r.id, 'knockout'] });
+          const legs = finalFix.rows;
+          if (legs.length > 0) {
+            const maxRound = legs[0].round;
+            const roundsRes = await db.execute({ sql: 'SELECT * FROM knockout_rounds WHERE tournament_id=? AND round=?', args: [r.id, maxRound] });
+            const isFinal = roundsRes.rows.length > 0 && roundsRes.rows[0].round_name === 'Final';
+            if (isFinal) {
+              const leg1 = legs.find(f => f.leg === 1);
+              // Final in group_knockout is single leg
+              if (leg1 && leg1.played) {
+                const winnerId = leg1.home_score > leg1.away_score ? leg1.home_team_id
+                  : leg1.away_score > leg1.home_score ? leg1.away_team_id : null;
+                if (winnerId) {
+                  const teamRes = await db.execute({ sql: 'SELECT name FROM teams WHERE id=?', args: [winnerId] });
+                  if (teamRes.rows.length > 0) winner = teamRes.rows[0].name;
+                }
+              }
+            }
+          }
+        }
+      } catch(_) {}
+      return { id:r.id, name:r.name, season:r.season, type:r.type, numGroups:r.num_groups, legs:r.legs, createdAt:r.created_at, winner };
+    }));
+    res.json(tournaments);
   } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
 });
 
