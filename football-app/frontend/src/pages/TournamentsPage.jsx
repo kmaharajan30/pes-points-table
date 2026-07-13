@@ -2,8 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   Box, Button, Card, CardContent, CardActionArea,
   Dialog, DialogTitle, DialogContent, DialogActions,
-  TextField, Typography, Grid, Chip,
-  IconButton, Tooltip, ToggleButton, ToggleButtonGroup,
+  TextField, Typography, IconButton, Tooltip, ToggleButton, ToggleButtonGroup,
   useMediaQuery
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
@@ -11,7 +10,6 @@ import AddRoundedIcon from '@mui/icons-material/AddRounded';
 import EmojiEventsRoundedIcon from '@mui/icons-material/EmojiEventsRounded';
 import DeleteOutlineRoundedIcon from '@mui/icons-material/DeleteOutlineRounded';
 import ArrowForwardRoundedIcon from '@mui/icons-material/ArrowForwardRounded';
-import CalendarTodayRoundedIcon from '@mui/icons-material/CalendarTodayRounded';
 import SportsSoccerRoundedIcon from '@mui/icons-material/SportsSoccerRounded';
 import AccountTreeRoundedIcon from '@mui/icons-material/AccountTreeRounded';
 import GroupsRoundedIcon from '@mui/icons-material/GroupsRounded';
@@ -71,55 +69,68 @@ export default function TournamentsPage({ onSelect }) {
       ) : tournaments.length===0 ? (
         <EmptyState icon="🏟️" title="No tournaments yet" subtitle="Create your first tournament to get started" />
       ) : (
-        <Grid container spacing={1.5}>
-          {tournaments.map(t => (
-            <Grid item xs={12} sm={6} md={4} key={t.id}>
-              <Card sx={{ height:'100%', background:'linear-gradient(135deg,#111827,#1a2035)', transition:'all 0.2s',
-                '&:hover':{ transform:'translateY(-2px)', boxShadow:'0 10px 32px rgba(0,230,118,0.12)', borderColor:'rgba(0,230,118,0.25)' } }}>
+        <Box sx={{ display:'flex', flexDirection:'column', gap:{ xs:1.5, sm:2 } }}>
+          {tournaments.map(t => {
+            const typeColor = t.type==='knockout'?'#a255ff':t.type==='group_knockout'?'#ff9800':'#00e676';
+            const typeBg = t.type==='knockout'?'rgba(101,31,255,0.12)':t.type==='group_knockout'?'rgba(255,152,0,0.12)':'rgba(0,230,118,0.08)';
+            const typeLabel = t.type==='knockout'?'Knockout':t.type==='group_knockout'?`Group+KO (${t.numGroups||2}G)`:'League';
+            const TypeIcon = t.type==='knockout'?AccountTreeRoundedIcon:t.type==='group_knockout'?GroupsRoundedIcon:SportsSoccerRoundedIcon;
+            return (
+              <Card key={t.id} sx={{
+                background:'linear-gradient(135deg,#111827 0%,#1a2035 100%)',
+                borderLeft:`3px solid ${typeColor}`,
+                transition:'all 0.2s ease',
+                '&:hover':{ transform:{ xs:'none', sm:'translateY(-2px)' }, boxShadow:`0 8px 24px ${typeBg}`, borderColor:`rgba(255,255,255,0.1)` }
+              }}>
                 <CardActionArea onClick={()=>onSelect(t)}>
-                  <CardContent sx={{ p:{ xs:2, sm:2.5 } }}>
-                    <Box sx={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', mb:1.5 }}>
-                      <Box sx={{ width:{ xs:36, sm:40 }, height:{ xs:36, sm:40 }, borderRadius:2,
-                        background:'linear-gradient(135deg,#00e676,#651fff)',
-                        display:'flex', alignItems:'center', justifyContent:'center' }}>
-                        <EmojiEventsRoundedIcon sx={{ color:'#000', fontSize:{ xs:18, sm:20 } }} />
+                  <CardContent sx={{ p:{ xs:2, sm:2.5 }, '&:last-child':{ pb:{ xs:2, sm:2.5 } } }}>
+                    <Box sx={{ display:'flex', alignItems:'center', gap:{ xs:1.5, sm:2 } }}>
+                      {/* Icon */}
+                      <Box sx={{
+                        width:{ xs:44, sm:48 }, height:{ xs:44, sm:48 }, borderRadius:2.5,
+                        background:`linear-gradient(135deg, ${typeColor}22, ${typeColor}44)`,
+                        border:`1px solid ${typeColor}33`,
+                        display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0
+                      }}>
+                        <EmojiEventsRoundedIcon sx={{ color:typeColor, fontSize:{ xs:22, sm:24 } }} />
                       </Box>
-                      <ArrowForwardRoundedIcon sx={{ color:'text.secondary', fontSize:18, mt:0.5 }} />
-                    </Box>
-                    <Typography variant="subtitle1" noWrap sx={{ fontWeight:800, mb:0.75, fontSize:{ xs:13, sm:15 } }}>
-                      {t.name}
-                    </Typography>
-                    <Box sx={{ display:'flex', gap:0.75, flexWrap:'wrap' }}>
-                      {t.season && (
-                        <Chip icon={<CalendarTodayRoundedIcon sx={{ fontSize:'11px !important' }} />}
-                          label={t.season} size="small"
-                          sx={{ bgcolor:'rgba(255,255,255,0.07)', fontSize:10, height:20 }} />
-                      )}
-                      <Chip
-                        icon={t.type==='knockout'
-                          ? <AccountTreeRoundedIcon sx={{ fontSize:'11px !important' }} />
-                          : t.type==='group_knockout'
-                            ? <GroupsRoundedIcon sx={{ fontSize:'11px !important' }} />
-                            : <SportsSoccerRoundedIcon sx={{ fontSize:'11px !important' }} />}
-                        label={t.type==='knockout'?'Knockout':t.type==='group_knockout'?`Group+KO (${t.numGroups||2}G)`:'League'}
-                        size="small"
-                        sx={{ fontSize:10, height:20, fontWeight:700,
-                          bgcolor: t.type==='knockout'?'rgba(101,31,255,0.15)':t.type==='group_knockout'?'rgba(255,152,0,0.15)':'rgba(0,230,118,0.12)',
-                          color: t.type==='knockout'?'#a255ff':t.type==='group_knockout'?'#ff9800':'#00e676',
-                          border:`1px solid ${t.type==='knockout'?'rgba(101,31,255,0.3)':t.type==='group_knockout'?'rgba(255,152,0,0.3)':'rgba(0,230,118,0.3)'}` }} />
+
+                      {/* Content */}
+                      <Box sx={{ flex:1, minWidth:0 }}>
+                        <Typography noWrap sx={{ fontWeight:700, fontSize:{ xs:14, sm:16 }, lineHeight:1.3, color:'#fff' }}>
+                          {t.name}
+                        </Typography>
+                        <Box sx={{ display:'flex', alignItems:'center', gap:0.75, mt:0.5 }}>
+                          <TypeIcon sx={{ fontSize:12, color:typeColor }} />
+                          <Typography sx={{ fontSize:{ xs:11, sm:12 }, color:typeColor, fontWeight:600 }}>
+                            {typeLabel}
+                          </Typography>
+                          {t.season && (
+                            <>
+                              <Box sx={{ width:3, height:3, borderRadius:'50%', bgcolor:'rgba(255,255,255,0.3)' }} />
+                              <Typography sx={{ fontSize:{ xs:11, sm:12 }, color:'text.secondary' }}>
+                                {t.season}
+                              </Typography>
+                            </>
+                          )}
+                        </Box>
+                      </Box>
+
+                      {/* Actions */}
+                      <Box sx={{ display:'flex', alignItems:'center', gap:0.5, flexShrink:0 }}>
+                        <IconButton size="small" onClick={e=>{ e.stopPropagation(); setDeleteTarget(t); }}
+                          sx={{ color:'rgba(255,82,82,0.7)', p:0.75, '&:hover':{ bgcolor:'rgba(255,82,82,0.1)', color:'#ff5252' } }}>
+                          <DeleteOutlineRoundedIcon sx={{ fontSize:{ xs:18, sm:20 } }} />
+                        </IconButton>
+                        <ArrowForwardRoundedIcon sx={{ color:'rgba(255,255,255,0.3)', fontSize:{ xs:18, sm:20 } }} />
+                      </Box>
                     </Box>
                   </CardContent>
                 </CardActionArea>
-                <Box sx={{ px:1.5, pb:1.5, display:'flex', justifyContent:'flex-end' }}>
-                  <IconButton size="small" onClick={e=>{ e.stopPropagation(); setDeleteTarget(t); }}
-                    sx={{ color:'error.main', p:0.75, '&:hover':{ bgcolor:'rgba(255,82,82,0.1)' } }}>
-                    <DeleteOutlineRoundedIcon sx={{ fontSize:18 }} />
-                  </IconButton>
-                </Box>
               </Card>
-            </Grid>
-          ))}
-        </Grid>
+            );
+          })}
+        </Box>
       )}
 
       {/* Create dialog */}
