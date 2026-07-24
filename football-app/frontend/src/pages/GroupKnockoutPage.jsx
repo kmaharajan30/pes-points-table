@@ -108,7 +108,7 @@ function ResultDialog({ open, fixture, onSave, onClose }) {
 }
 
 // ── Group Table (used in Table view) ──────────────────────────────────────────
-function GroupTable({ groupName, table }) {
+function GroupTable({ groupName, table, qualifyCount = 2, qualifyRound = 'Semi-Finals' }) {
   return (
     <Box sx={{ mb:3 }}>
       <Typography variant="subtitle1" sx={{ fontWeight:800, mb:1.25, color:'text.primary', fontSize:15 }}>
@@ -126,7 +126,7 @@ function GroupTable({ groupName, table }) {
           ))}
         </Box>
         {table.map((row, idx) => {
-          const isQ = idx < 2;
+          const isQ = idx < qualifyCount;
           const gdLabel = row.gd > 0 ? `+${row.gd}` : String(row.gd);
           return (
             <Box key={row.teamId} sx={{
@@ -165,7 +165,7 @@ function GroupTable({ groupName, table }) {
         })}
         <Box sx={{ px:2, py:0.75, borderTop:'1px solid rgba(255,255,255,0.05)', display:'flex', alignItems:'center', gap:1 }}>
           <Box sx={{ width:8, height:8, borderRadius:'50%', bgcolor:'#00e676' }} />
-          <Typography variant="caption" sx={{ fontSize:9, color:'text.secondary' }}>Top 2 qualify for Semi-Finals</Typography>
+          <Typography variant="caption" sx={{ fontSize:9, color:'text.secondary' }}>Top {qualifyCount || 2} qualify for {qualifyRound || 'Semi-Finals'}</Typography>
         </Box>
       </Card>
     </Box>
@@ -327,10 +327,13 @@ function useGroupKnockoutData(tournamentId) {
 }
 
 // ── TABLE VIEW ─────────────────────────────────────────────────────────────────
-function TableView({ tournament, groupTables, loading, error, setError }) {
+function TableView({ tournament, groupTables, loading, error, setError, bracket }) {
   // All rows across groups to find the overall leader
   const allRows = groupTables.flatMap(g => g.table);
   const leader  = allRows.reduce((best, r) => (!best || r.pts > best.pts) ? r : best, null);
+  const hasQF   = bracket.some(r => r.roundName === 'Quarter-Final');
+  const qualifyCount = hasQF ? 4 : 2;
+  const qualifyRound = hasQF ? 'Quarter-Finals' : 'Semi-Finals';
 
   return (
     <Box>
@@ -364,7 +367,7 @@ function TableView({ tournament, groupTables, loading, error, setError }) {
       ) : (
         <Box>
           {groupTables.map(({ group, table }) => (
-            <GroupTable key={group} groupName={group} table={table} />
+            <GroupTable key={group} groupName={group} table={table} qualifyCount={qualifyCount} qualifyRound={qualifyRound} />
           ))}
           {/* Legend */}
           <Box sx={{ display:{ xs:'none', sm:'flex' }, px:0.5, py:1, gap:2.5, flexWrap:'wrap' }}>
@@ -393,7 +396,7 @@ export default function GroupKnockoutPage({ tournament, view = 'fixtures' }) {
   const [deleteFix,    setDeleteFix]    = useState(null);
 
   // Table view delegates to TableView after all hooks are called
-  if (view === 'table') return <TableView groupTables={groupTables} loading={loading} error={error} setError={setError} tournament={tournament} />;
+  if (view === 'table') return <TableView groupTables={groupTables} loading={loading} error={error} setError={setError} tournament={tournament} bracket={bracket} />;
 
   const handleGenerate = async () => {
     if (groupFixtures.length > 0) {
@@ -413,15 +416,15 @@ export default function GroupKnockoutPage({ tournament, view = 'fixtures' }) {
 
   const handleSeedKnockout = async () => {
     setSeeding(true); setError('');
-    try { await seedKnockout(tournament.id); await load(); setSuccessMsg('Semi-finals seeded!'); }
+    try { await seedKnockout(tournament.id); await load(); setSuccessMsg(hasQF ? 'Quarter-finals seeded!' : 'Semi-finals seeded!'); }
     catch(e) { setError(e?.response?.data?.error || 'Seeding failed'); }
     setSeeding(false);
   };
 
   const handleSeedFinal = async () => {
     setSeedingFinal(true); setError('');
-    try { await seedFinal(tournament.id); await load(); setSuccessMsg('Final seeded!'); }
-    catch(e) { setError(e?.response?.data?.error || 'Could not seed final yet'); }
+    try { await seedFinal(tournament.id); await load(); setSuccessMsg(`${nextRoundToSeed} seeded!`); }
+    catch(e) { setError(e?.response?.data?.error || 'Could not seed next round yet'); }
     setSeedingFinal(false);
   };
 
@@ -440,9 +443,27 @@ export default function GroupKnockoutPage({ tournament, view = 'fixtures' }) {
   const totalGroupFixtures  = groupFixtures.length;
   const playedGroupFixtures = groupFixtures.filter(f=>f.played).length;
   const allGroupComplete    = totalGroupFixtures > 0 && playedGroupFixtures === totalGroupFixtures;
+  const qfRound    = bracket.find(r => r.roundName === 'Quarter-Final');
   const sfRound    = bracket.find(r => r.roundName === 'Semi-Final');
   const finalRound = bracket.find(r => r.roundName === 'Final');
+  const hasQF      = !!qfRound;
+  const firstKnockoutRound = hasQF ? qfRound : sfRound;
+  const firstKnockoutSeeded = firstKnockoutRound?.matches.some(m => !m.isPlaceholder);
+  const allQFComplete = qfRound?.matches.every(m => m.winner);
   const allSFComplete = sfRound?.matches.every(m => m.winner);
+  
+  // Determine which round needs advancing next
+  const needsSeedKnockout = allGroupComplete && !firstKnockoutSeeded;
+  const needsSeedNextRound = hasQF
+    ? (allQFComplete && sfRound?.matches.every(m => m.isPlaceholder))
+      || (allSFComplete && finalRound?.matches[0]?.isPlaceholder)
+    : (allSFComplete && finalRound?.matches[0]?.isPlaceholder);
+
+  const nextRoundToSeed = hasQF
+    ? (allQFComplete && sfRound?.matches.every(m => m.isPlaceholder)) ? 'Semi-Final'
+      : (allSFComplete && finalRound?.matches[0]?.isPlaceholder) ? 'Final' : null
+    : (allSFComplete && finalRound?.matches[0]?.isPlaceholder) ? 'Final' : null;
+
   const champion   = finalRound?.matches[0]?.winner;
   const groups     = [...new Set(groupFixtures.map(f => f.groupName).filter(Boolean))].sort();
 
@@ -478,20 +499,20 @@ export default function GroupKnockoutPage({ tournament, view = 'fixtures' }) {
           sx={{ background:'linear-gradient(135deg,#651fff,#3500cb)', color:'#fff', fontSize:{ xs:11, sm:13 } }}>
           {generating ? 'Generating…' : groupFixtures.length > 0 ? 'Re-draw Groups' : 'Generate Fixtures'}
         </Button>
-        {allGroupComplete && !sfRound?.matches.some(m => !m.isPlaceholder) && (
+        {needsSeedKnockout && (
           <Button variant="contained" size="small"
             startIcon={<AccountTreeRoundedIcon sx={{ fontSize:'16px !important' }} />}
             onClick={handleSeedKnockout} disabled={seeding}
             sx={{ background:'linear-gradient(135deg,#ff9800,#e65100)', color:'#000', fontWeight:800, fontSize:{ xs:11, sm:13 } }}>
-            {seeding ? 'Seeding…' : 'Seed Semi-Finals →'}
+            {seeding ? 'Seeding…' : hasQF ? 'Seed Quarter-Finals →' : 'Seed Semi-Finals →'}
           </Button>
         )}
-        {allSFComplete && finalRound?.matches[0]?.isPlaceholder && (
+        {needsSeedNextRound && (
           <Button variant="contained" size="small"
             startIcon={<EmojiEventsRoundedIcon sx={{ fontSize:'16px !important' }} />}
             onClick={handleSeedFinal} disabled={seedingFinal}
             sx={{ background:'linear-gradient(135deg,#ffd740,#ff9800)', color:'#000', fontWeight:800, fontSize:{ xs:11, sm:13 } }}>
-            {seedingFinal ? 'Seeding…' : 'Seed Final →'}
+            {seedingFinal ? 'Seeding…' : `Seed ${nextRoundToSeed} →`}
           </Button>
         )}
       </Box>
@@ -566,7 +587,9 @@ export default function GroupKnockoutPage({ tournament, view = 'fixtures' }) {
                 <Box sx={{ display:'flex', gap:2, alignItems:'flex-start',
                   minWidth: bracket.length > 1 ? bracket.length * 260 : 'auto' }}>
                   {bracket.map(round => {
-                    const isCurrent = round.roundName === 'Semi-Final' ? !allSFComplete : round.roundName === 'Final';
+                    const isCurrent = round.roundName === 'Quarter-Final' ? !allQFComplete
+                      : round.roundName === 'Semi-Final' ? (hasQF ? (allQFComplete && !allSFComplete) : !allSFComplete)
+                      : round.roundName === 'Final';
                     return (
                       <Box key={round.round} sx={{ flex:1, minWidth:240 }}>
                         <Box sx={{ textAlign:'center', mb:1.5, py:1, borderRadius:1.5,
@@ -578,7 +601,7 @@ export default function GroupKnockoutPage({ tournament, view = 'fixtures' }) {
                             color: isCurrent ? '#ff9800' : 'text.secondary' }}>
                             {round.roundName}
                           </Typography>
-                          {round.roundName === 'Semi-Final' && (
+                          {(round.roundName === 'Quarter-Final' || round.roundName === 'Semi-Final') && (
                             <Typography variant="caption" sx={{ display:'block', fontSize:9, color:'text.secondary' }}>2 legs · aggregate</Typography>
                           )}
                           {round.roundName === 'Final' && (
