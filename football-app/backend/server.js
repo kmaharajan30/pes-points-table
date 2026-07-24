@@ -123,10 +123,10 @@ function generateGroupLeagueFixtures(teams, tournamentId, legs=2) {
   return fixtures;
 }
 
-function generateGroupKnockoutStage(tournamentId, teamCount) {
+function generateGroupKnockoutStage(tournamentId, numGroups) {
   const fixtures = [];
-  if (teamCount >= 14) {
-    // Quarter-finals (4 matches, 2 legs each)
+  if (numGroups >= 4) {
+    // 4 groups → Quarter-finals (4 matches, 2 legs each)
     for (let m = 1; m <= 4; m++) {
       fixtures.push({ id: uuidv4(), tournament_id: tournamentId, home_team_id: null, away_team_id: null, fixture_type: 'knockout', round: 1, match_number: m, leg: 1, group_name: null });
       fixtures.push({ id: uuidv4(), tournament_id: tournamentId, home_team_id: null, away_team_id: null, fixture_type: 'knockout', round: 1, match_number: m, leg: 2, group_name: null });
@@ -139,7 +139,7 @@ function generateGroupKnockoutStage(tournamentId, teamCount) {
     // Final (1 leg)
     fixtures.push({ id: uuidv4(), tournament_id: tournamentId, home_team_id: null, away_team_id: null, fixture_type: 'knockout', round: 3, match_number: 1, leg: 1, group_name: null });
   } else {
-    // Semi-finals (2 matches, 2 legs each)
+    // 2 groups → Semi-finals (2 matches, 2 legs each)
     fixtures.push({ id: uuidv4(), tournament_id: tournamentId, home_team_id: null, away_team_id: null, fixture_type: 'knockout', round: 1, match_number: 1, leg: 1, group_name: null });
     fixtures.push({ id: uuidv4(), tournament_id: tournamentId, home_team_id: null, away_team_id: null, fixture_type: 'knockout', round: 1, match_number: 1, leg: 2, group_name: null });
     fixtures.push({ id: uuidv4(), tournament_id: tournamentId, home_team_id: null, away_team_id: null, fixture_type: 'knockout', round: 1, match_number: 2, leg: 1, group_name: null });
@@ -398,7 +398,14 @@ app.post('/api/tournaments/:tId/generate-fixtures', requireAuth, async (req, res
     if (t.type === 'group_knockout') {
       const bodyLegs = Number(req.body?.legs);
       overrideLegs = (Number.isFinite(bodyLegs) && bodyLegs === 1) ? 1 : 2;
-      await db.execute({ sql: 'UPDATE tournaments SET legs=? WHERE id=?', args: [overrideLegs, req.params.tId] });
+      // Allow overriding num_groups from the request body (e.g. re-draw with different group count)
+      const bodyNumGroups = parseInt(req.body?.num_groups);
+      if (Number.isFinite(bodyNumGroups) && bodyNumGroups >= 2) {
+        await db.execute({ sql: 'UPDATE tournaments SET legs=?, num_groups=? WHERE id=?', args: [overrideLegs, bodyNumGroups, req.params.tId] });
+        t.num_groups = bodyNumGroups;
+      } else {
+        await db.execute({ sql: 'UPDATE tournaments SET legs=? WHERE id=?', args: [overrideLegs, req.params.tId] });
+      }
     }
 
     // Clear existing fixtures
@@ -448,10 +455,10 @@ app.post('/api/tournaments/:tId/generate-fixtures', requireAuth, async (req, res
         const grpTeams = shuffled.filter(t => t.group_name === grp);
         allGroupFixtures.push(...generateGroupLeagueFixtures(grpTeams, req.params.tId, legsToUse));
       }
-      const knockoutFixtures = generateGroupKnockoutStage(req.params.tId, teams.length);
+      const knockoutFixtures = generateGroupKnockoutStage(req.params.tId, numGroups);
 
       const roundStmts = [];
-      if (teams.length >= 14) {
+      if (numGroups >= 4) {
         roundStmts.push({ sql: 'INSERT INTO knockout_rounds (id,tournament_id,round,round_name) VALUES (?,?,?,?)', args: [uuidv4(), req.params.tId, 1, 'Quarter-Final'] });
         roundStmts.push({ sql: 'INSERT INTO knockout_rounds (id,tournament_id,round,round_name) VALUES (?,?,?,?)', args: [uuidv4(), req.params.tId, 2, 'Semi-Final'] });
         roundStmts.push({ sql: 'INSERT INTO knockout_rounds (id,tournament_id,round,round_name) VALUES (?,?,?,?)', args: [uuidv4(), req.params.tId, 3, 'Final'] });
@@ -466,7 +473,7 @@ app.post('/api/tournaments/:tId/generate-fixtures', requireAuth, async (req, res
         ...roundStmts,
       ];
       await db.batch(allStmts, 'write');
-      res.json({ message: `Generated group stage + knockout`, groupCount: numGroups, groupFixtures: allGroupFixtures.length, knockoutFixtures: knockoutFixtures.length, legs: legsToUse, hasQuarterFinal: teams.length >= 14 });
+      res.json({ message: `Generated group stage + knockout`, groupCount: numGroups, groupFixtures: allGroupFixtures.length, knockoutFixtures: knockoutFixtures.length, legs: legsToUse, hasQuarterFinal: numGroups >= 4 });
     }
   } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
 });
@@ -620,36 +627,106 @@ app.get('/api/tournaments/:tId/group-fixtures', requireAuth, async (req, res) =>
   } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
 });
 
+// ─── Reset knockout team assignments (clear stale seeding so re-seed works) ──
+app.post('/api/tournaments/:tId/reset-knockout-seeds', requireAuth, async (req, res) => {
+  try {
+    const tRes = await db.execute({ sql: 'SELECT * FROM tournaments WHERE id=? AND code=?', args: [req.params.tId, req.user.code] });
+    if (tRes.rows.length === 0 || tRes.rows[0].type !== 'group_knockout') return res.status(400).json({ error: 'Not a group_knockout tournament' });
+    // Clear all team assignments from ALL knockout rounds (set back to placeholder TBD)
+    await db.execute({
+      sql: 'UPDATE fixtures SET home_team_id=NULL, away_team_id=NULL, home_score=NULL, away_score=NULL, played=0 WHERE tournament_id=? AND fixture_type=?',
+      args: [req.params.tId, 'knockout']
+    });
+    res.json({ message: 'All knockout seeds cleared. You can now re-seed from group results.' });
+  } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
+});
+
 app.post('/api/tournaments/:tId/seed-knockout', requireAuth, async (req, res) => {
   try {
     const tRes = await db.execute({ sql: 'SELECT * FROM tournaments WHERE id=? AND code=?', args: [req.params.tId, req.user.code] });
     if (tRes.rows.length === 0 || tRes.rows[0].type !== 'group_knockout') return res.status(400).json({ error: 'Not a group_knockout tournament' });
     const t = tRes.rows[0];
-    const numGroups = t.num_groups || 2;
-    const groupLetters = Array.from({length: numGroups}, (_, i) => String.fromCharCode(65 + i));
 
-    // Count total teams to determine bracket size
-    const teamsCount = await db.execute({ sql: 'SELECT COUNT(*) as c FROM teams WHERE tournament_id=?', args: [req.params.tId] });
-    const totalTeams = teamsCount.rows[0].c;
+    // ── Determine actual bracket structure from DB (not just num_groups) ──────
+    // This is the source of truth: what rounds were actually generated?
+    const roundsRes = await db.execute({
+      sql: 'SELECT * FROM knockout_rounds WHERE tournament_id=? ORDER BY round',
+      args: [req.params.tId]
+    });
+    if (roundsRes.rows.length === 0) {
+      return res.status(400).json({ error: 'No knockout rounds found. Generate fixtures first.' });
+    }
 
-    if (totalTeams >= 14) {
-      // Quarter-final: Top 4 from each group, A1 vs B4, A2 vs B3, B1 vs A4, B2 vs A3
-      const qualifiers = {};
-      for (const grp of groupLetters) {
-        const table = await computeGroupTable(req.params.tId, grp);
-        if (table.length < 4) return res.status(400).json({ error: `Group ${grp} doesn't have at least 4 teams with results` });
-        qualifiers[grp] = table.slice(0, 4);
+    const firstRound = roundsRes.rows[0]; // round 1: either 'Quarter-Final' or 'Semi-Final'
+    const isQFBracket = firstRound.round_name === 'Quarter-Final';
+
+    // ── Determine actual groups from the DB ───────────────────────────────────
+    const grpRes = await db.execute({
+      sql: 'SELECT DISTINCT group_name FROM teams WHERE tournament_id=? AND group_name IS NOT NULL ORDER BY group_name',
+      args: [req.params.tId]
+    });
+    const actualGroups = grpRes.rows.map(r => r.group_name).sort();
+    const numActualGroups = actualGroups.length;
+
+    if (numActualGroups < 2) {
+      return res.status(400).json({ error: 'No groups found. Generate fixtures first.' });
+    }
+
+    // ── Validate: QF bracket needs exactly 4 groups; SF bracket needs exactly 2 ─
+    if (isQFBracket && numActualGroups !== 4) {
+      return res.status(400).json({
+        error: `Quarter-Final bracket requires 4 groups but found ${numActualGroups}. Re-draw fixtures with 4 groups first.`
+      });
+    }
+    if (!isQFBracket && numActualGroups !== 2) {
+      return res.status(400).json({
+        error: `Semi-Final bracket requires 2 groups but found ${numActualGroups}. Re-draw fixtures with 2 groups first.`
+      });
+    }
+
+    // ── Validate ALL group fixtures are played ────────────────────────────────
+    const groupFixRes = await db.execute({
+      sql: 'SELECT COUNT(*) as total, SUM(played) as done FROM fixtures WHERE tournament_id=? AND fixture_type=?',
+      args: [req.params.tId, 'group_league']
+    });
+    const totalGroupFix = Number(groupFixRes.rows[0].total);
+    const playedGroupFix = Number(groupFixRes.rows[0].done);
+    if (totalGroupFix === 0) return res.status(400).json({ error: 'No group fixtures found. Generate fixtures first.' });
+    if (playedGroupFix < totalGroupFix) {
+      return res.status(400).json({
+        error: `All group matches must be played first. ${playedGroupFix}/${totalGroupFix} played.`
+      });
+    }
+
+    // ── Collect top 2 from each actual group ──────────────────────────────────
+    const qualifiers = {};
+    for (const grp of actualGroups) {
+      const table = await computeGroupTable(req.params.tId, grp);
+      if (table.length < 2) {
+        return res.status(400).json({ error: `Group ${grp} has fewer than 2 teams.` });
       }
+      const unplayed = table.filter(row => row.mp === 0);
+      if (unplayed.length > 0) {
+        return res.status(400).json({
+          error: `Group ${grp}: [${unplayed.map(r => r.name).join(', ')}] have not played yet.`
+        });
+      }
+      // Strictly top 2 only
+      qualifiers[grp] = table.slice(0, 2);
+    }
 
-      // QF1: A1 vs B4, QF2: A2 vs B3, QF3: B1 vs A4, QF4: B2 vs A3
+    const updates = [];
+
+    if (isQFBracket) {
+      // 4 groups → QF: GA1 vs GD2, GA2 vs GD1, GB1 vs GC2, GB2 vs GC1
+      const [A, B, C, D] = actualGroups; // 'A','B','C','D'
       const qfMatches = [
-        { matchNumber: 1, home: qualifiers['A'][0].teamId, away: qualifiers['B'][3].teamId },
-        { matchNumber: 2, home: qualifiers['A'][1].teamId, away: qualifiers['B'][2].teamId },
-        { matchNumber: 3, home: qualifiers['B'][0].teamId, away: qualifiers['A'][3].teamId },
-        { matchNumber: 4, home: qualifiers['B'][1].teamId, away: qualifiers['A'][2].teamId },
+        { matchNumber: 1, home: qualifiers[A][0].teamId, away: qualifiers[D][1].teamId },
+        { matchNumber: 2, home: qualifiers[A][1].teamId, away: qualifiers[D][0].teamId },
+        { matchNumber: 3, home: qualifiers[B][0].teamId, away: qualifiers[C][1].teamId },
+        { matchNumber: 4, home: qualifiers[B][1].teamId, away: qualifiers[C][0].teamId },
       ];
 
-      const updates = [];
       for (const qf of qfMatches) {
         const leg1 = await db.execute({ sql: 'SELECT id FROM fixtures WHERE tournament_id=? AND fixture_type=? AND round=1 AND match_number=? AND leg=1', args: [req.params.tId, 'knockout', qf.matchNumber] });
         const leg2 = await db.execute({ sql: 'SELECT id FROM fixtures WHERE tournament_id=? AND fixture_type=? AND round=1 AND match_number=? AND leg=2', args: [req.params.tId, 'knockout', qf.matchNumber] });
@@ -657,27 +734,23 @@ app.post('/api/tournaments/:tId/seed-knockout', requireAuth, async (req, res) =>
         if (leg2.rows.length > 0) updates.push({ sql: 'UPDATE fixtures SET home_team_id=?, away_team_id=? WHERE id=?', args: [qf.away, qf.home, leg2.rows[0].id] });
       }
       if (updates.length > 0) await db.batch(updates, 'write');
-      res.json({ message: 'Quarter-final seeded', matches: qfMatches });
+      return res.json({
+        message: 'Quarter-finals seeded',
+        seeding: `${A}1 vs ${D}2 | ${A}2 vs ${D}1 | ${B}1 vs ${C}2 | ${B}2 vs ${C}1`,
+        qualifiers: Object.fromEntries(actualGroups.map(g => [
+          `Group ${g}`,
+          qualifiers[g].map((team, i) => `${i + 1}. ${team.name} (${team.pts}pts, GD${team.gd >= 0 ? '+' : ''}${team.gd})`)
+        ]))
+      });
 
     } else {
-      // Original flow: Top 2 from each group → Semi-finals
-      const qualifiers = {};
-      for (const grp of groupLetters) {
-        const table = await computeGroupTable(req.params.tId, grp);
-        qualifiers[grp] = table.slice(0, 2);
-      }
+      // 2 groups → SF: A1 vs B2, B1 vs A2
+      const [A, B] = actualGroups;
+      const sfMatches = [
+        { matchNumber: 1, home: qualifiers[A][0].teamId, away: qualifiers[B][1].teamId },
+        { matchNumber: 2, home: qualifiers[B][0].teamId, away: qualifiers[A][1].teamId },
+      ];
 
-      const sfMatches = [];
-      for (let i = 0; i < numGroups; i++) {
-        const grpA = groupLetters[i];
-        const grpB = groupLetters[(i + 1) % numGroups];
-        const first = qualifiers[grpA]?.[0];
-        const second = qualifiers[grpB]?.[1];
-        if (!first || !second) return res.status(400).json({ error: `Group ${grpA} or ${grpB} doesn't have enough results yet` });
-        sfMatches.push({ matchNumber: i + 1, home: first.teamId, away: second.teamId });
-      }
-
-      const updates = [];
       for (const sf of sfMatches) {
         const leg1 = await db.execute({ sql: 'SELECT id FROM fixtures WHERE tournament_id=? AND fixture_type=? AND round=1 AND match_number=? AND leg=1', args: [req.params.tId, 'knockout', sf.matchNumber] });
         const leg2 = await db.execute({ sql: 'SELECT id FROM fixtures WHERE tournament_id=? AND fixture_type=? AND round=1 AND match_number=? AND leg=2', args: [req.params.tId, 'knockout', sf.matchNumber] });
@@ -685,7 +758,14 @@ app.post('/api/tournaments/:tId/seed-knockout', requireAuth, async (req, res) =>
         if (leg2.rows.length > 0) updates.push({ sql: 'UPDATE fixtures SET home_team_id=?, away_team_id=? WHERE id=?', args: [sf.away, sf.home, leg2.rows[0].id] });
       }
       if (updates.length > 0) await db.batch(updates, 'write');
-      res.json({ message: 'Knockout stage seeded', matches: sfMatches });
+      return res.json({
+        message: 'Semi-finals seeded',
+        seeding: `${A}1 vs ${B}2 | ${B}1 vs ${A}2`,
+        qualifiers: Object.fromEntries(actualGroups.map(g => [
+          `Group ${g}`,
+          qualifiers[g].map((team, i) => `${i + 1}. ${team.name} (${team.pts}pts, GD${team.gd >= 0 ? '+' : ''}${team.gd})`)
+        ]))
+      });
     }
   } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
 });

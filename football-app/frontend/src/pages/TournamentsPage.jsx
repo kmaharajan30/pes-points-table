@@ -215,7 +215,9 @@ export default function TournamentsPage({ onSelect }) {
             <Typography variant="caption" color="text.secondary" sx={{ mt:0.5, display:'block', fontSize:10 }}>
               {form.type==='league' ? 'Each team plays every other team twice (home & away)'
                 : form.type==='knockout' ? 'Two-legged knockout — aggregate goals decide the winner'
-                : 'Group stage league → Top 2 per group → Semi-finals (2 legs) + Final (1 match)'}
+                : form.num_groups >= 4
+                  ? 'Group stage (1 leg) → Top 2 per group → Quarter-finals (2 legs) → Semi-finals (2 legs) → Final'
+                  : 'Group stage league → Top 2 per group → Semi-finals (2 legs) + Final (1 match)'}
             </Typography>
             {form.type === 'league' && (
               <Box sx={{ mt:1.5 }}>
@@ -241,16 +243,18 @@ export default function TournamentsPage({ onSelect }) {
                   Number of Groups
                 </Typography>
                 <ToggleButtonGroup value={form.num_groups} exclusive fullWidth size="small"
-                  onChange={(_,v)=>v&&setForm({...form,num_groups:v})}>
-                  {[2,3,4].map(n=>(
-                    <ToggleButton key={n} value={n} disabled={n > 2} sx={{ fontWeight:700, fontSize:12,
+                  onChange={(_,v)=>v&&setForm({...form, num_groups:v, ...(v >= 4 ? { legs: 1 } : {})})}>
+                  {[2,4].map(n=>(
+                    <ToggleButton key={n} value={n} sx={{ fontWeight:700, fontSize:12,
                       '&.Mui-selected':{ bgcolor:'rgba(255,152,0,0.15)', color:'#ff9800', borderColor:'rgba(255,152,0,0.4)' } }}>
-                      {n} Groups{n > 2 ? ' (soon)' : ''}
+                      {n} Groups
                     </ToggleButton>
                   ))}
                 </ToggleButtonGroup>
                 <Typography variant="caption" color="text.secondary" sx={{ mt:0.5, display:'block', fontSize:10 }}>
-                  Teams will be distributed evenly across {form.num_groups} groups (need ≥ {form.num_groups * 2} teams)
+                  {form.num_groups >= 4
+                    ? `4 groups · top 2 qualify → QF → SF → Final (need ≥ ${form.num_groups * 2} teams)`
+                    : `Teams will be distributed evenly across ${form.num_groups} groups (need ≥ ${form.num_groups * 2} teams)`}
                 </Typography>
               </Box>
             )}
@@ -265,11 +269,16 @@ export default function TournamentsPage({ onSelect }) {
                     '&.Mui-selected':{ bgcolor:'rgba(255,152,0,0.15)', color:'#ff9800', borderColor:'rgba(255,152,0,0.4)' } }}>
                     1 Leg
                   </ToggleButton>
-                  <ToggleButton value={2} sx={{ fontWeight:700, fontSize:12,
+                  <ToggleButton value={2} disabled={form.num_groups >= 4} sx={{ fontWeight:700, fontSize:12,
                     '&.Mui-selected':{ bgcolor:'rgba(255,152,0,0.15)', color:'#ff9800', borderColor:'rgba(255,152,0,0.4)' } }}>
                     2 Legs (Home &amp; Away)
                   </ToggleButton>
                 </ToggleButtonGroup>
+                {form.num_groups >= 4 && (
+                  <Typography variant="caption" color="text.secondary" sx={{ mt:0.5, display:'block', fontSize:10 }}>
+                    4-group format uses 1 leg in the group stage
+                  </Typography>
+                )}
               </Box>
             )}
           </Box>

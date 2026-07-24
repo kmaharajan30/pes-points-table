@@ -16,12 +16,12 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import LoadingState from '../components/LoadingState';
 import {
   getGroupTables, getGroupFixtures, getGroupKnockout,
-  generateFixtures, seedKnockout, seedFinal,
+  generateFixtures, seedKnockout, resetKnockoutSeeds, seedFinal,
   addResult, deleteFixture
 } from '../api/footballApi';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
-  TextField
+  TextField, ToggleButtonGroup, ToggleButton
 } from '@mui/material';
 
 // ── Shared helpers ─────────────────────────────────────────────────────────────
@@ -332,7 +332,7 @@ function TableView({ tournament, groupTables, loading, error, setError, bracket 
   const allRows = groupTables.flatMap(g => g.table);
   const leader  = allRows.reduce((best, r) => (!best || r.pts > best.pts) ? r : best, null);
   const hasQF   = bracket.some(r => r.roundName === 'Quarter-Final');
-  const qualifyCount = hasQF ? 4 : 2;
+  const qualifyCount = 2;
   const qualifyRound = hasQF ? 'Quarter-Finals' : 'Semi-Finals';
 
   return (
@@ -388,28 +388,37 @@ export default function GroupKnockoutPage({ tournament, view = 'fixtures' }) {
   // All hooks must be called unconditionally (Rules of Hooks)
   const { groupTables, groupFixtures, bracket, loading, error, setError, load } = useGroupKnockoutData(tournament.id);
 
-  const [generating,   setGenerating]   = useState(false);
-  const [seeding,      setSeeding]      = useState(false);
-  const [seedingFinal, setSeedingFinal] = useState(false);
-  const [successMsg,   setSuccessMsg]   = useState('');
-  const [resultFix,    setResultFix]    = useState(null);
-  const [deleteFix,    setDeleteFix]    = useState(null);
+  const [generating,    setGenerating]   = useState(false);
+  const [seeding,       setSeeding]      = useState(false);
+  const [resetting,     setResetting]    = useState(false);
+  const [seedingFinal,  setSeedingFinal] = useState(false);
+  const [successMsg,    setSuccessMsg]   = useState('');
+  const [resultFix,     setResultFix]    = useState(null);
+  const [deleteFix,     setDeleteFix]    = useState(null);
+  // Re-draw config dialog
+  const [redrawOpen,    setRedrawOpen]   = useState(false);
+  const [redrawConfig,  setRedrawConfig] = useState({
+    num_groups: tournament.numGroups || 2,
+    legs: tournament.legs || 1,
+  });
 
   // Table view delegates to TableView after all hooks are called
   if (view === 'table') return <TableView groupTables={groupTables} loading={loading} error={error} setError={setError} tournament={tournament} bracket={bracket} />;
 
+  const openGenerate = () => {
+    // Pre-fill dialog with current tournament settings
+    setRedrawConfig({ num_groups: tournament.numGroups || 2, legs: tournament.legs || 1 });
+    setRedrawOpen(true);
+  };
+
   const handleGenerate = async () => {
-    if (groupFixtures.length > 0) {
-      const ok = window.confirm('Re-draw will reset all group fixtures and results. Continue?');
-      if (!ok) return;
-    }
+    setRedrawOpen(false);
     setGenerating(true); setError('');
     try {
-      // Use legs stored on the tournament (set at creation time)
-      const legs = tournament.legs || 2;
-      await generateFixtures(tournament.id, { legs });
+      const { legs, num_groups } = redrawConfig;
+      await generateFixtures(tournament.id, { legs, num_groups });
       await load();
-      setSuccessMsg(`Fixtures generated (${legs === 1 ? '1 leg' : '2 legs'})!`);
+      setSuccessMsg(`Fixtures generated (${num_groups} groups, ${legs === 1 ? '1 leg' : '2 legs'})!`);
     } catch(e) { setError(e?.response?.data?.error || 'Generation failed'); }
     setGenerating(false);
   };
@@ -419,6 +428,15 @@ export default function GroupKnockoutPage({ tournament, view = 'fixtures' }) {
     try { await seedKnockout(tournament.id); await load(); setSuccessMsg(hasQF ? 'Quarter-finals seeded!' : 'Semi-finals seeded!'); }
     catch(e) { setError(e?.response?.data?.error || 'Seeding failed'); }
     setSeeding(false);
+  };
+
+  const handleResetSeeds = async () => {
+    const ok = window.confirm('This will clear all knockout team assignments and results so you can re-seed correctly. Continue?');
+    if (!ok) return;
+    setResetting(true); setError('');
+    try { await resetKnockoutSeeds(tournament.id); await load(); setSuccessMsg('Knockout seeds cleared — ready to re-seed.'); }
+    catch(e) { setError(e?.response?.data?.error || 'Reset failed'); }
+    setResetting(false);
   };
 
   const handleSeedFinal = async () => {
@@ -495,7 +513,7 @@ export default function GroupKnockoutPage({ tournament, view = 'fixtures' }) {
       <Box sx={{ mb:2.5, display:'flex', gap:1, flexWrap:'wrap' }}>
         <Button variant="contained" size="small"
           startIcon={<AutoFixHighRoundedIcon sx={{ fontSize:'16px !important' }} />}
-          onClick={handleGenerate} disabled={generating}
+          onClick={openGenerate} disabled={generating}
           sx={{ background:'linear-gradient(135deg,#651fff,#3500cb)', color:'#fff', fontSize:{ xs:11, sm:13 } }}>
           {generating ? 'Generating…' : groupFixtures.length > 0 ? 'Re-draw Groups' : 'Generate Fixtures'}
         </Button>
@@ -505,6 +523,15 @@ export default function GroupKnockoutPage({ tournament, view = 'fixtures' }) {
             onClick={handleSeedKnockout} disabled={seeding}
             sx={{ background:'linear-gradient(135deg,#ff9800,#e65100)', color:'#000', fontWeight:800, fontSize:{ xs:11, sm:13 } }}>
             {seeding ? 'Seeding…' : hasQF ? 'Seed Quarter-Finals →' : 'Seed Semi-Finals →'}
+          </Button>
+        )}
+        {/* Show reset button when knockout has been seeded (so user can fix wrong seeds) */}
+        {false && firstKnockoutSeeded && !champion && (
+          <Button variant="outlined" size="small"
+            onClick={handleResetSeeds} disabled={resetting}
+            sx={{ borderColor:'rgba(255,82,82,0.4)', color:'#ff5252', fontSize:{ xs:11, sm:12 },
+              '&:hover':{ borderColor:'#ff5252', bgcolor:'rgba(255,82,82,0.08)' } }}>
+            {resetting ? 'Resetting…' : 'Reset Seeds'}
           </Button>
         )}
         {needsSeedNextRound && (
@@ -628,6 +655,74 @@ export default function GroupKnockoutPage({ tournament, view = 'fixtures' }) {
       <ConfirmDialog open={!!deleteFix} title="Delete Fixture"
         message={`Delete this match between "${deleteFix?.homeTeam?.name||'?'}" and "${deleteFix?.awayTeam?.name||'?'}"?`}
         onConfirm={handleDelete} onCancel={()=>setDeleteFix(null)} />
+
+      {/* Re-draw / Generate config dialog */}
+      <Dialog open={redrawOpen} onClose={()=>setRedrawOpen(false)} maxWidth="xs" fullWidth
+        PaperProps={{ sx:{ borderRadius:3 } }}>
+        <DialogTitle sx={{ pb:1 }}>
+          <Box sx={{ display:'flex', alignItems:'center', gap:1.25 }}>
+            <AutoFixHighRoundedIcon sx={{ color:'#651fff', fontSize:20 }} />
+            <Typography variant="subtitle1" sx={{ fontWeight:700 }}>
+              {groupFixtures.length > 0 ? 'Re-draw Groups' : 'Generate Fixtures'}
+            </Typography>
+          </Box>
+          {groupFixtures.length > 0 && (
+            <Typography variant="caption" color="error.main" sx={{ display:'block', mt:0.5, fontSize:10 }}>
+              ⚠ This will reset all group fixtures and results
+            </Typography>
+          )}
+        </DialogTitle>
+        <DialogContent sx={{ pt:'12px !important', display:'flex', flexDirection:'column', gap:2 }}>
+          <Box>
+            <Typography variant="caption" color="text.secondary" sx={{ mb:0.75, display:'block', fontWeight:600 }}>
+              Number of Groups
+            </Typography>
+            <ToggleButtonGroup value={redrawConfig.num_groups} exclusive fullWidth size="small"
+              onChange={(_,v) => v && setRedrawConfig(c => ({ ...c, num_groups: v, ...(v >= 4 ? { legs: 1 } : {}) }))}>
+              {[2, 4].map(n => (
+                <ToggleButton key={n} value={n} sx={{ fontWeight:700, fontSize:12,
+                  '&.Mui-selected':{ bgcolor:'rgba(101,31,255,0.15)', color:'#a255ff', borderColor:'rgba(101,31,255,0.4)' } }}>
+                  {n} Groups
+                </ToggleButton>
+              ))}
+            </ToggleButtonGroup>
+            <Typography variant="caption" color="text.secondary" sx={{ mt:0.5, display:'block', fontSize:10 }}>
+              {redrawConfig.num_groups >= 4
+                ? 'Top 2 per group → Quarter-Finals (2 legs) → Semi-Finals (2 legs) → Final'
+                : 'Top 2 per group → Semi-Finals (2 legs) → Final'}
+            </Typography>
+          </Box>
+          <Box>
+            <Typography variant="caption" color="text.secondary" sx={{ mb:0.75, display:'block', fontWeight:600 }}>
+              Group Stage Legs
+            </Typography>
+            <ToggleButtonGroup value={redrawConfig.legs} exclusive fullWidth size="small"
+              onChange={(_,v) => v && setRedrawConfig(c => ({ ...c, legs: v }))}>
+              <ToggleButton value={1} sx={{ fontWeight:700, fontSize:12,
+                '&.Mui-selected':{ bgcolor:'rgba(101,31,255,0.15)', color:'#a255ff', borderColor:'rgba(101,31,255,0.4)' } }}>
+                1 Leg
+              </ToggleButton>
+              <ToggleButton value={2} disabled={redrawConfig.num_groups >= 4} sx={{ fontWeight:700, fontSize:12,
+                '&.Mui-selected':{ bgcolor:'rgba(101,31,255,0.15)', color:'#a255ff', borderColor:'rgba(101,31,255,0.4)' } }}>
+                2 Legs
+              </ToggleButton>
+            </ToggleButtonGroup>
+            {redrawConfig.num_groups >= 4 && (
+              <Typography variant="caption" color="text.secondary" sx={{ mt:0.5, display:'block', fontSize:10 }}>
+                4-group format uses 1 leg in the group stage
+              </Typography>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ px:2.5, pb:2.5, gap:1 }}>
+          <Button onClick={()=>setRedrawOpen(false)} variant="outlined" color="inherit" size="small"
+            sx={{ borderColor:'rgba(255,255,255,0.15)' }}>Cancel</Button>
+          <Button onClick={handleGenerate} variant="contained" size="small"
+            sx={{ background:'linear-gradient(135deg,#651fff,#3500cb)', color:'#fff' }}>
+            {groupFixtures.length > 0 ? 'Re-draw' : 'Generate'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }
