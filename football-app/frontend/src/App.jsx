@@ -13,6 +13,7 @@ import SportsSoccerRoundedIcon from '@mui/icons-material/SportsSoccerRounded';
 import LeaderboardRoundedIcon from '@mui/icons-material/LeaderboardRounded';
 import ArrowBackIosNewRoundedIcon from '@mui/icons-material/ArrowBackIosNewRounded';
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded';
+import StarRoundedIcon from '@mui/icons-material/StarRounded';
 import theme from './theme/theme';
 import LoginPage from './pages/LoginPage';
 import TournamentsPage from './pages/TournamentsPage';
@@ -20,6 +21,7 @@ import TeamsPage from './pages/TeamsPage';
 import FixturesPage from './pages/FixturesPage';
 import PointsTablePage from './pages/PointsTablePage';
 import GroupKnockoutPage from './pages/GroupKnockoutPage';
+import TopStatsPage from './pages/TopStatsPage';
 import ActiveUsers from './components/ActiveUsers';
 
 const DRAWER_WIDTH = 248;
@@ -44,6 +46,7 @@ export default function App() {
   const [user, setUser] = useState(() => JSON.parse(localStorage.getItem('fp_user') || 'null'));
   const [activeTournament, setActiveTournament] = useState(null);
   const [activeTab, setActiveTab] = useState('teams');
+  const [globalTab, setGlobalTab] = useState('tournaments');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState(null);
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
@@ -59,7 +62,7 @@ export default function App() {
   const handleLogin    = (u) => setUser(u);
   const handleLogout   = () => { localStorage.removeItem('fp_user'); setUser(null); setActiveTournament(null); setAnchorEl(null); };
   const handleSelect   = (t) => { setActiveTournament(t); setActiveTab('teams'); setDrawerOpen(false); };
-  const handleBack     = () => { setActiveTournament(null); setDrawerOpen(false); };
+  const handleBack     = () => { setActiveTournament(null); setGlobalTab('tournaments'); setDrawerOpen(false); };
 
   const drawerContent = (
     <Box sx={{ display:'flex', flexDirection:'column', height:'100%', py:1.5 }}>
@@ -80,7 +83,7 @@ export default function App() {
 
       <List dense sx={{ px:0.75 }}>
         <ListItem disablePadding>
-          <ListItemButton selected={!activeTournament} onClick={handleBack}
+          <ListItemButton selected={!activeTournament && globalTab === 'tournaments'} onClick={handleBack}
             sx={{ borderRadius:1.5, mb:0.25, py:0.75,
               '&.Mui-selected':{ background:'linear-gradient(90deg,rgba(0,230,118,0.15),rgba(101,31,255,0.08))',
                 borderLeft:'3px solid #00e676',
@@ -89,6 +92,19 @@ export default function App() {
               '&:hover':{ background:'rgba(255,255,255,0.04)' } }}>
             <ListItemIcon sx={{ minWidth:32 }}><EmojiEventsRoundedIcon sx={{ fontSize:18 }} /></ListItemIcon>
             <ListItemText primary="Tournaments" primaryTypographyProps={{ fontSize:13 }} />
+          </ListItemButton>
+        </ListItem>
+        <ListItem disablePadding>
+          <ListItemButton selected={!activeTournament && globalTab === 'stats'}
+            onClick={()=>{ setActiveTournament(null); setGlobalTab('stats'); setDrawerOpen(false); }}
+            sx={{ borderRadius:1.5, mb:0.25, py:0.75,
+              '&.Mui-selected':{ background:'linear-gradient(90deg,rgba(255,215,0,0.15),rgba(255,152,0,0.08))',
+                borderLeft:'3px solid #ffd700',
+                '& .MuiListItemIcon-root':{ color:'#ffd700' },
+                '& .MuiListItemText-primary':{ color:'#ffd700', fontWeight:700 } },
+              '&:hover':{ background:'rgba(255,255,255,0.04)' } }}>
+            <ListItemIcon sx={{ minWidth:32 }}><StarRoundedIcon sx={{ fontSize:18 }} /></ListItemIcon>
+            <ListItemText primary="Top Performances" primaryTypographyProps={{ fontSize:13 }} />
           </ListItemButton>
         </ListItem>
       </List>
@@ -156,7 +172,10 @@ export default function App() {
   );
 
   const renderPage = () => {
-    if (!activeTournament) return <TournamentsPage onSelect={handleSelect} />;
+    if (!activeTournament) {
+      if (globalTab === 'stats') return <TopStatsPage />;
+      return <TournamentsPage onSelect={handleSelect} />;
+    }
     if (activeTournament.type === 'group_knockout') {
       if (activeTab === 'teams')    return <TeamsPage tournament={activeTournament} />;
       if (activeTab === 'table')    return <GroupKnockoutPage tournament={activeTournament} view="table" />;

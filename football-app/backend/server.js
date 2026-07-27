@@ -898,6 +898,191 @@ app.get('/api/tournaments/:tId/table', requireAuth, async (req, res) => {
   } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
 });
 
+// ─── Top Performances & Stats (cross-tournament) ──────────────────────────────
+app.get('/api/stats', requireAuth, async (req, res) => {
+  try {
+    const code = req.user.code;
+
+    // Get all tournaments for this code
+    const tournamentsRes = await db.execute({ sql: 'SELECT * FROM tournaments WHERE code=? ORDER BY created_at DESC', args: [code] });
+    const tournaments = tournamentsRes.rows;
+
+    if (tournaments.length === 0) {
+      return res.json({ topPerformers: [], bestMatch: null, topScorers: [] });
+    }
+
+    // ─── Top Performers: teams that won tournaments (rank 1,2,3,3) ─────────
+    const winnerCounts = {}; // teamName -> win count
+
+    for (const t of tournaments) {
+      let winner = null, runnerUp = null, thirdPlaces = [];
+
+      if (t.type === 'league') {
+        const table = await computeTable(t.id);
+        const allDone = await db.execute({ sql: 'SELECT COUNT(*) as c FROM fixtures WHERE tournament_id=? AND fixture_type=? AND played=0', args: [t.id, 'league'] });
+        if (table.length > 0 && table[0].mp > 0 && allDone.rows[0].c === 0) {
+          winner = table[0]?.name || null;
+          runnerUp = table[1]?.name || null;
+          thirdPlaces = table[2] ? [table[2].name] : [];
+          if (table[3]) thirdPlaces.push(table[3].name);
+        }
+      } else if (t.type === 'knockout') {
+        const roundsRes = await db.execute({ sql: 'SELECT MAX(round) as r FROM fixtures WHERE tournament_id=? AND fixture_type=?', args: [t.id, 'knockout'] });
+        const maxRound = roundsRes.rows[0]?.r;
+        if (maxRound) {
+          const finalFix = await db.execute({ sql: 'SELECT * FROM fixtures WHERE tournament_id=? AND fixture_type=? AND round=? ORDER BY leg', args: [t.id, 'knockout', maxRound] });
+          const legs = finalFix.rows;
+          const leg1 = legs.find(f => f.leg === 1);
+          const leg2 = legs.find(f => f.leg === 2);
+          const winnerId = knockoutWinner(leg1, leg2);
+          if (winnerId) {
+            const teamRes = await db.execute({ sql: 'SELECT name FROM teams WHERE id=?', args: [winnerId] });
+            winner = teamRes.rows[0]?.name || null;
+            const loserId = winnerId === leg1?.home_team_id ? leg1?.away_team_id : leg1?.home_team_id;
+            if (loserId) {
+              const loserRes = await db.execute({ sql: 'SELECT name FROM teams WHERE id=?', args: [loserId] });
+              runnerUp = loserRes.rows[0]?.name || null;
+            }
+            // Semi-final losers are 3rd place
+            if (maxRound >= 2) {
+              const sfFix = await db.execute({ sql: 'SELECT * FROM fixtures WHERE tournament_id=? AND fixture_type=? AND round=? ORDER BY match_number,leg', args: [t.id, 'knockout', maxRound - 1] });
+              const sfMatchNums = [...new Set(sfFix.rows.map(f => f.match_number))];
+              for (const mn of sfMatchNums) {
+                const sfLegs = sfFix.rows.filter(f => f.match_number === mn).sort((a,b) => a.leg - b.leg);
+                const sfLeg1 = sfLegs.find(f => f.leg === 1);
+                const sfLeg2 = sfLegs.find(f => f.leg === 2);
+                const sfWinner = knockoutWinner(sfLeg1, sfLeg2);
+                if (sfWinner) {
+                  const loserId2 = sfWinner === sfLeg1?.home_team_id ? sfLeg1?.away_team_id : sfLeg1?.home_team_id;
+                  if (loserId2) {
+                    const loserRes2 = await db.execute({ sql: 'SELECT name FROM teams WHERE id=?', args: [loserId2] });
+                    if (loserRes2.rows[0]?.name) thirdPlaces.push(loserRes2.rows[0].name);
+                  }
+                }
+              }
+            }
+          }
+        }
+      } else if (t.type === 'group_knockout') {
+        const roundsRes = await db.execute({ sql: 'SELECT * FROM knockout_rounds WHERE tournament_id=? ORDER BY round DESC', args: [t.id] });
+        const finalRound = roundsRes.rows.find(r => r.round_name === 'Final');
+        if (finalRound) {
+          const finalFix = await db.execute({ sql: 'SELECT * FROM fixtures WHERE tournament_id=? AND fixture_type=? AND round=? AND match_number=1 AND leg=1', args: [t.id, 'knockout', finalRound.round] });
+          const leg1 = finalFix.rows[0];
+          if (leg1 && leg1.played) {
+            const winnerId = leg1.home_score > leg1.away_score ? leg1.home_team_id
+              : leg1.away_score > leg1.home_score ? leg1.away_team_id : null;
+            const loserId = winnerId === leg1.home_team_id ? leg1.away_team_id : leg1.home_team_id;
+            if (winnerId) {
+              const teamRes = await db.execute({ sql: 'SELECT name FROM teams WHERE id=?', args: [winnerId] });
+              winner = teamRes.rows[0]?.name || null;
+            }
+            if (loserId) {
+              const loserRes = await db.execute({ sql: 'SELECT name FROM teams WHERE id=?', args: [loserId] });
+              runnerUp = loserRes.rows[0]?.name || null;
+            }
+            // Semi-final losers
+            const sfRound = roundsRes.rows.find(r => r.round_name === 'Semi-Final');
+            if (sfRound) {
+              const sfFix = await db.execute({ sql: 'SELECT * FROM fixtures WHERE tournament_id=? AND fixture_type=? AND round=? ORDER BY match_number,leg', args: [t.id, 'knockout', sfRound.round] });
+              const sfMatchNums = [...new Set(sfFix.rows.map(f => f.match_number))];
+              for (const mn of sfMatchNums) {
+                const sfLegs = sfFix.rows.filter(f => f.match_number === mn).sort((a,b) => a.leg - b.leg);
+                const sfLeg1 = sfLegs.find(f => f.leg === 1);
+                const sfLeg2 = sfLegs.find(f => f.leg === 2);
+                let sfWinner = null;
+                if (sfLeg1 && sfLeg2 && sfLeg1.played && sfLeg2.played) {
+                  sfWinner = knockoutWinner(sfLeg1, sfLeg2);
+                } else if (sfLeg1 && sfLeg1.played && !sfLeg2) {
+                  // single leg SF in group_knockout
+                  sfWinner = sfLeg1.home_score > sfLeg1.away_score ? sfLeg1.home_team_id
+                    : sfLeg1.away_score > sfLeg1.home_score ? sfLeg1.away_team_id : null;
+                }
+                if (sfWinner) {
+                  const loserId2 = sfWinner === sfLeg1?.home_team_id ? sfLeg1?.away_team_id : sfLeg1?.home_team_id;
+                  if (loserId2) {
+                    const loserRes2 = await db.execute({ sql: 'SELECT name FROM teams WHERE id=?', args: [loserId2] });
+                    if (loserRes2.rows[0]?.name) thirdPlaces.push(loserRes2.rows[0].name);
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      if (winner) {
+        winnerCounts[winner] = winnerCounts[winner] || { gold: 0, silver: 0 };
+        winnerCounts[winner].gold++;
+      }
+      if (runnerUp) {
+        winnerCounts[runnerUp] = winnerCounts[runnerUp] || { gold: 0, silver: 0 };
+        winnerCounts[runnerUp].silver++;
+      }
+    }
+
+    const topPerformers = Object.entries(winnerCounts)
+      .map(([name, medals]) => ({ name, ...medals, total: medals.gold * 2 + medals.silver }))
+      .sort((a, b) => b.total - a.total || b.gold - a.gold || b.silver - a.silver);
+
+    // ─── Best Match of the Season: highest total goals + closest margin ─────
+    let bestMatch = null;
+    let bestScore = -1;
+
+    for (const t of tournaments) {
+      const fixRes = await db.execute({ sql: 'SELECT * FROM fixtures WHERE tournament_id=? AND played=1', args: [t.id] });
+      const tm = await teamMap(t.id);
+      for (const f of fixRes.rows) {
+        const totalGoals = (f.home_score || 0) + (f.away_score || 0);
+        const margin = Math.abs((f.home_score || 0) - (f.away_score || 0));
+        // Score: more goals and tighter margin = better match
+        const score = totalGoals * 10 - margin;
+        if (score > bestScore && totalGoals > 0) {
+          bestScore = score;
+          bestMatch = {
+            homeTeam: tm[f.home_team_id]?.name || 'Unknown',
+            awayTeam: tm[f.away_team_id]?.name || 'Unknown',
+            homeScore: f.home_score,
+            awayScore: f.away_score,
+            totalGoals,
+            margin,
+            tournament: t.name,
+            fixtureType: f.fixture_type,
+            round: f.round,
+          };
+        }
+      }
+    }
+
+    // ─── Most Goals Scored by a Team (aggregate by name across tournaments) ──
+    const teamGoals = {}; // teamName -> { goals, matches }
+    for (const t of tournaments) {
+      const fixRes = await db.execute({ sql: 'SELECT * FROM fixtures WHERE tournament_id=? AND played=1', args: [t.id] });
+      const tm = await teamMap(t.id);
+      for (const f of fixRes.rows) {
+        const homeName = tm[f.home_team_id]?.name;
+        const awayName = tm[f.away_team_id]?.name;
+        if (homeName) {
+          teamGoals[homeName] = teamGoals[homeName] || { goals: 0, matches: 0 };
+          teamGoals[homeName].goals += f.home_score || 0;
+          teamGoals[homeName].matches++;
+        }
+        if (awayName) {
+          teamGoals[awayName] = teamGoals[awayName] || { goals: 0, matches: 0 };
+          teamGoals[awayName].goals += f.away_score || 0;
+          teamGoals[awayName].matches++;
+        }
+      }
+    }
+
+    const topScorers = Object.entries(teamGoals)
+      .map(([name, data]) => ({ name, goals: data.goals, matches: data.matches, avgGoals: data.matches > 0 ? +(data.goals / data.matches).toFixed(2) : 0 }))
+      .sort((a, b) => b.goals - a.goals || b.avgGoals - a.avgGoals);
+
+    res.json({ topPerformers, bestMatch, topScorers, totalTournaments: tournaments.length });
+  } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
+});
+
 // ─── Start ────────────────────────────────────────────────────────────────────
 async function startServer() {
   initDb();

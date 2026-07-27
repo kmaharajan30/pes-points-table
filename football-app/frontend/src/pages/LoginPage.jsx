@@ -40,9 +40,22 @@ export default function LoginPage({ onLogin }) {
       justifyContent: 'center',
       bgcolor: 'background.default',
       p: 2,
+      position: 'relative',
       // Animated background
       background: 'radial-gradient(ellipse at 20% 50%, rgba(0,230,118,0.07) 0%, transparent 60%), radial-gradient(ellipse at 80% 20%, rgba(101,31,255,0.08) 0%, transparent 60%), #0a0e1a',
     }}>
+      {/* Version badge - top right */}
+      <Box sx={{
+        position: 'fixed', top: 16, right: 16, zIndex: 10,
+        px: 1.5, py: 0.5, borderRadius: 2,
+        background: 'rgba(255,255,255,0.04)',
+        border: '1px solid rgba(255,255,255,0.08)',
+        backdropFilter: 'blur(8px)',
+      }}>
+        <Typography sx={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.5)', letterSpacing: '0.03em' }}>
+          v2.0.0
+        </Typography>
+      </Box>
       {/* Decorative blobs */}
       <Box sx={{
         position: 'fixed', top: '10%', left: '5%',
@@ -192,9 +205,6 @@ export default function LoginPage({ onLogin }) {
           </CardContent>
         </Card>
 
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', textAlign: 'center', mt: 3, opacity: 0.5 }}>
-          FootballPro v1.0.0 · Your data is private to your code
-        </Typography>
       </Box>
     </Box>
   );

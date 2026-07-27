@@ -55,6 +55,9 @@ export const getKnockoutBracket = (tId)            => axios.get(`${BASE}/tournam
 // Points Table
 export const getTable = (tId) => axios.get(`${BASE}/tournaments/${tId}/table`);
 
+// Cross-tournament Stats
+export const getStats = () => axios.get(`${BASE}/stats`);
+
 // Group Knockout
 export const getGroupTables        = (tId) => axios.get(`${BASE}/tournaments/${tId}/group-tables`);
 export const getGroupFixtures      = (tId) => axios.get(`${BASE}/tournaments/${tId}/group-fixtures`);
