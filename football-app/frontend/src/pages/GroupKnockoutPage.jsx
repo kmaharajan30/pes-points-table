@@ -568,8 +568,8 @@ export default function GroupKnockoutPage({ tournament, view = 'fixtures' }) {
             {seedingFinal ? 'Seeding…' : `Seed ${nextRoundToSeed} →`}
           </Button>
         )}
-        {/* Show Regenerate QF button when QF is seeded but no champion yet */}
-        {hasQF && firstKnockoutSeeded && !champion && (
+        {/* Show Regenerate QF button whenever QF exists and has been seeded */}
+        {hasQF && firstKnockoutSeeded && (
           <Button variant="outlined" size="small"
             startIcon={<AutoFixHighRoundedIcon sx={{ fontSize:'16px !important' }} />}
             onClick={handleRegenQF} disabled={regenQF}
