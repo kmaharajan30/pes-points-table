@@ -17,7 +17,7 @@ import LoadingState from '../components/LoadingState';
 import {
   getGroupTables, getGroupFixtures, getGroupKnockout,
   generateFixtures, seedKnockout, resetKnockoutSeeds, seedFinal,
-  addResult, deleteFixture
+  addResult, deleteFixture, regenerateQuarterFinals
 } from '../api/footballApi';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
@@ -408,6 +408,7 @@ export default function GroupKnockoutPage({ tournament, view = 'fixtures' }) {
   const [seeding,       setSeeding]      = useState(false);
   const [resetting,     setResetting]    = useState(false);
   const [seedingFinal,  setSeedingFinal] = useState(false);
+  const [regenQF,       setRegenQF]      = useState(false);
   const [successMsg,    setSuccessMsg]   = useState('');
   const [resultFix,     setResultFix]    = useState(null);
   const [deleteFix,     setDeleteFix]    = useState(null);
@@ -460,6 +461,15 @@ export default function GroupKnockoutPage({ tournament, view = 'fixtures' }) {
     try { await seedFinal(tournament.id); await load(); setSuccessMsg(`${nextRoundToSeed} seeded!`); }
     catch(e) { setError(e?.response?.data?.error || 'Could not seed next round yet'); }
     setSeedingFinal(false);
+  };
+
+  const handleRegenQF = async () => {
+    const ok = window.confirm('This will reset all Quarter-Final, Semi-Final and Final scores and re-seed the QF from current group standings. Continue?');
+    if (!ok) return;
+    setRegenQF(true); setError('');
+    try { await regenerateQuarterFinals(tournament.id); await load(); setSuccessMsg('Quarter-Finals regenerated! Re-enter the scores.'); }
+    catch(e) { setError(e?.response?.data?.error || 'Regeneration failed'); }
+    setRegenQF(false);
   };
 
   const handleResult = async (fixtureId, scores) => {
@@ -556,6 +566,16 @@ export default function GroupKnockoutPage({ tournament, view = 'fixtures' }) {
             onClick={handleSeedFinal} disabled={seedingFinal}
             sx={{ background:'linear-gradient(135deg,#ffd740,#ff9800)', color:'#000', fontWeight:800, fontSize:{ xs:11, sm:13 } }}>
             {seedingFinal ? 'Seeding…' : `Seed ${nextRoundToSeed} →`}
+          </Button>
+        )}
+        {/* Show Regenerate QF button when QF is seeded but no champion yet */}
+        {hasQF && firstKnockoutSeeded && !champion && (
+          <Button variant="outlined" size="small"
+            startIcon={<AutoFixHighRoundedIcon sx={{ fontSize:'16px !important' }} />}
+            onClick={handleRegenQF} disabled={regenQF}
+            sx={{ borderColor:'rgba(255,152,0,0.4)', color:'#ff9800', fontSize:{ xs:11, sm:12 },
+              '&:hover':{ borderColor:'#ff9800', bgcolor:'rgba(255,152,0,0.08)' } }}>
+            {regenQF ? 'Regenerating…' : 'Regenerate QF'}
           </Button>
         )}
       </Box>

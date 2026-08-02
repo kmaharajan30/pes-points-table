@@ -655,6 +655,74 @@ app.post('/api/tournaments/:tId/reset-knockout-seeds', requireAuth, async (req, 
   } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
 });
 
+// ─── Regenerate Quarter-Final fixtures (preserves group data + scores) ────────
+// Deletes only the QF fixture rows (round 1) and recreates them as blank
+// placeholders, then re-seeds from current group results so the user can
+// re-enter any missing scores.
+app.post('/api/tournaments/:tId/regenerate-quarter-finals', requireAuth, async (req, res) => {
+  try {
+    const tRes = await db.execute({ sql: 'SELECT * FROM tournaments WHERE id=? AND code=?', args: [req.params.tId, req.user.code] });
+    if (tRes.rows.length === 0 || tRes.rows[0].type !== 'group_knockout') return res.status(400).json({ error: 'Not a group_knockout tournament' });
+
+    // Confirm round 1 is actually a Quarter-Final
+    const roundRes = await db.execute({ sql: 'SELECT * FROM knockout_rounds WHERE tournament_id=? AND round=1', args: [req.params.tId] });
+    if (roundRes.rows.length === 0 || roundRes.rows[0].round_name !== 'Quarter-Final') {
+      return res.status(400).json({ error: 'This tournament does not have a Quarter-Final round' });
+    }
+
+    // Delete all QF fixtures (round 1) and anything seeded beyond (SF + Final)
+    // so the bracket is consistent — user must re-seed SF/Final after this
+    await db.execute({ sql: 'DELETE FROM fixtures WHERE tournament_id=? AND fixture_type=? AND round>=1', args: [req.params.tId, 'knockout'] });
+
+    // Recreate blank QF fixtures (4 matches × 2 legs)
+    const newFixtures = [];
+    for (let m = 1; m <= 4; m++) {
+      newFixtures.push({ sql: 'INSERT INTO fixtures (id,tournament_id,home_team_id,away_team_id,fixture_type,round,match_number,leg,group_name) VALUES (?,?,?,?,?,?,?,?,?)', args: [uuidv4(), req.params.tId, null, null, 'knockout', 1, m, 1, null] });
+      newFixtures.push({ sql: 'INSERT INTO fixtures (id,tournament_id,home_team_id,away_team_id,fixture_type,round,match_number,leg,group_name) VALUES (?,?,?,?,?,?,?,?,?)', args: [uuidv4(), req.params.tId, null, null, 'knockout', 1, m, 2, null] });
+    }
+
+    // Recreate blank SF fixtures (2 matches × 2 legs)
+    for (let m = 1; m <= 2; m++) {
+      newFixtures.push({ sql: 'INSERT INTO fixtures (id,tournament_id,home_team_id,away_team_id,fixture_type,round,match_number,leg,group_name) VALUES (?,?,?,?,?,?,?,?,?)', args: [uuidv4(), req.params.tId, null, null, 'knockout', 2, m, 1, null] });
+      newFixtures.push({ sql: 'INSERT INTO fixtures (id,tournament_id,home_team_id,away_team_id,fixture_type,round,match_number,leg,group_name) VALUES (?,?,?,?,?,?,?,?,?)', args: [uuidv4(), req.params.tId, null, null, 'knockout', 2, m, 2, null] });
+    }
+
+    // Recreate blank Final fixture (1 leg)
+    newFixtures.push({ sql: 'INSERT INTO fixtures (id,tournament_id,home_team_id,away_team_id,fixture_type,round,match_number,leg,group_name) VALUES (?,?,?,?,?,?,?,?,?)', args: [uuidv4(), req.params.tId, null, null, 'knockout', 3, 1, 1, null] });
+
+    await db.batch(newFixtures, 'write');
+
+    // Auto-seed QF from current group standings
+    const grpRes = await db.execute({ sql: 'SELECT DISTINCT group_name FROM teams WHERE tournament_id=? AND group_name IS NOT NULL ORDER BY group_name', args: [req.params.tId] });
+    const actualGroups = grpRes.rows.map(r => r.group_name).sort();
+    if (actualGroups.length === 4) {
+      const qualifiers = {};
+      for (const grp of actualGroups) {
+        const table = await computeGroupTable(req.params.tId, grp);
+        qualifiers[grp] = table.slice(0, 2);
+      }
+      const [A, B, C, D] = actualGroups;
+      const qfMatches = [
+        { matchNumber: 1, home: qualifiers[A][0]?.teamId, away: qualifiers[D][1]?.teamId },
+        { matchNumber: 2, home: qualifiers[A][1]?.teamId, away: qualifiers[D][0]?.teamId },
+        { matchNumber: 3, home: qualifiers[B][0]?.teamId, away: qualifiers[C][1]?.teamId },
+        { matchNumber: 4, home: qualifiers[B][1]?.teamId, away: qualifiers[C][0]?.teamId },
+      ];
+      const seedUpdates = [];
+      for (const qf of qfMatches) {
+        if (!qf.home || !qf.away) continue;
+        const leg1 = await db.execute({ sql: 'SELECT id FROM fixtures WHERE tournament_id=? AND fixture_type=? AND round=1 AND match_number=? AND leg=1', args: [req.params.tId, 'knockout', qf.matchNumber] });
+        const leg2 = await db.execute({ sql: 'SELECT id FROM fixtures WHERE tournament_id=? AND fixture_type=? AND round=1 AND match_number=? AND leg=2', args: [req.params.tId, 'knockout', qf.matchNumber] });
+        if (leg1.rows.length > 0) seedUpdates.push({ sql: 'UPDATE fixtures SET home_team_id=?, away_team_id=? WHERE id=?', args: [qf.home, qf.away, leg1.rows[0].id] });
+        if (leg2.rows.length > 0) seedUpdates.push({ sql: 'UPDATE fixtures SET home_team_id=?, away_team_id=? WHERE id=?', args: [qf.away, qf.home, leg2.rows[0].id] });
+      }
+      if (seedUpdates.length > 0) await db.batch(seedUpdates, 'write');
+    }
+
+    res.json({ message: 'Quarter-Finals regenerated and re-seeded. Re-enter QF scores, then seed Semi-Finals.' });
+  } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
+});
+
 app.post('/api/tournaments/:tId/seed-knockout', requireAuth, async (req, res) => {
   try {
     const tRes = await db.execute({ sql: 'SELECT * FROM tournaments WHERE id=? AND code=?', args: [req.params.tId, req.user.code] });
