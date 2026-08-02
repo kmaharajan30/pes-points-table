@@ -241,6 +241,8 @@ function KoMatchCard({ match, onResult, onDelete, isActive }) {
     );
   }
 
+  // For 2-leg knockout matches, always show both leg slots. If leg2 is missing
+  // from the DB (deleted previously), show it as a missing/unrecoverable placeholder.
   const legs = match.isFinal ? [match.leg1] : [match.leg1, match.leg2];
 
   return (
@@ -260,25 +262,39 @@ function KoMatchCard({ match, onResult, onDelete, isActive }) {
           </Box>
         </Box>
         <Stack spacing={1}>
-          {legs.filter(Boolean).map((leg,i)=>(
-            <Box key={i} sx={{ display:'flex', alignItems:'center', gap:1, p:'6px 10px', borderRadius:1.5,
-              background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.05)' }}>
-              {!match.isFinal && <Typography variant="caption" sx={{ color:'text.secondary', fontWeight:700, minWidth:36, fontSize:10 }}>LEG {i+1}</Typography>}
-              <Box sx={{ flex:1 }}><ScorePill home={leg.homeScore} away={leg.awayScore} played={leg.played} /></Box>
-              {isActive && (
-                <Box sx={{ display:'flex', gap:0.25 }}>
-                  <IconButton size="small" onClick={()=>onResult(leg)}
-                    sx={{ color:'primary.main', p:0.4, '&:hover':{ bgcolor:'rgba(0,230,118,0.1)' } }}>
-                    <EditNoteRoundedIcon sx={{ fontSize:16 }} />
-                  </IconButton>
-                  <IconButton size="small" onClick={()=>onDelete(leg)}
-                    sx={{ color:'error.main', p:0.4, '&:hover':{ bgcolor:'rgba(255,82,82,0.1)' } }}>
-                    <DeleteOutlineRoundedIcon sx={{ fontSize:16 }} />
-                  </IconButton>
+          {legs.map((leg, i) => {
+            // leg is null means the DB row was deleted — show a warning placeholder
+            if (!leg) {
+              return (
+                <Box key={i} sx={{ display:'flex', alignItems:'center', gap:1, p:'6px 10px', borderRadius:1.5,
+                  background:'rgba(255,82,82,0.06)', border:'1px dashed rgba(255,82,82,0.3)' }}>
+                  {!match.isFinal && <Typography variant="caption" sx={{ color:'error.main', fontWeight:700, minWidth:36, fontSize:10 }}>LEG {i+1}</Typography>}
+                  <Typography variant="caption" sx={{ color:'error.main', fontSize:10, flex:1 }}>
+                    Score was deleted — use Reset Seeds to restore
+                  </Typography>
                 </Box>
-              )}
-            </Box>
-          ))}
+              );
+            }
+            return (
+              <Box key={i} sx={{ display:'flex', alignItems:'center', gap:1, p:'6px 10px', borderRadius:1.5,
+                background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.05)' }}>
+                {!match.isFinal && <Typography variant="caption" sx={{ color:'text.secondary', fontWeight:700, minWidth:36, fontSize:10 }}>LEG {i+1}</Typography>}
+                <Box sx={{ flex:1 }}><ScorePill home={leg.homeScore} away={leg.awayScore} played={leg.played} /></Box>
+                {isActive && (
+                  <Box sx={{ display:'flex', gap:0.25 }}>
+                    <IconButton size="small" onClick={()=>onResult(leg)}
+                      sx={{ color:'primary.main', p:0.4, '&:hover':{ bgcolor:'rgba(0,230,118,0.1)' } }}>
+                      <EditNoteRoundedIcon sx={{ fontSize:16 }} />
+                    </IconButton>
+                    <IconButton size="small" onClick={()=>onDelete(leg)}
+                      sx={{ color:'error.main', p:0.4, '&:hover':{ bgcolor:'rgba(255,82,82,0.1)' } }}>
+                      <DeleteOutlineRoundedIcon sx={{ fontSize:16 }} />
+                    </IconButton>
+                  </Box>
+                )}
+              </Box>
+            );
+          })}
         </Stack>
         {both && match.winner && (
           <Box sx={{ mt:1.5, pt:1.5, borderTop:'1px solid rgba(255,255,255,0.06)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>

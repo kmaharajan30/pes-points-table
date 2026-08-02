@@ -599,7 +599,21 @@ app.put('/api/tournaments/:tId/fixtures/:fId/result', requireAuth, async (req, r
 
 app.delete('/api/tournaments/:tId/fixtures/:fId', requireAuth, async (req, res) => {
   try {
-    await db.execute({ sql: 'DELETE FROM fixtures WHERE id=?', args: [req.params.fId] });
+    // Check the fixture type before deleting
+    const check = await db.execute({ sql: 'SELECT fixture_type FROM fixtures WHERE id=?', args: [req.params.fId] });
+    if (check.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+
+    if (check.rows[0].fixture_type === 'knockout') {
+      // For knockout fixtures, reset the score instead of deleting the row.
+      // Deleting a leg row causes it to vanish from the bracket, making it impossible
+      // to re-enter the result from the UI.
+      await db.execute({
+        sql: 'UPDATE fixtures SET home_score=NULL, away_score=NULL, played=0 WHERE id=?',
+        args: [req.params.fId]
+      });
+    } else {
+      await db.execute({ sql: 'DELETE FROM fixtures WHERE id=?', args: [req.params.fId] });
+    }
     res.json({ message: 'Deleted' });
   } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
 });
@@ -849,8 +863,40 @@ app.get('/api/tournaments/:tId/group-knockout-bracket', requireAuth, async (req,
     const roundsRes = await db.execute({ sql: 'SELECT * FROM knockout_rounds WHERE tournament_id=? ORDER BY round', args: [req.params.tId] });
     const fixRes = await db.execute({ sql: 'SELECT * FROM fixtures WHERE tournament_id=? AND fixture_type=? ORDER BY round,match_number,leg', args: [req.params.tId, 'knockout'] });
 
+    // ── Auto-repair: recreate any missing leg 2 rows for 2-leg rounds ─────────
+    // If a leg 2 fixture was accidentally hard-deleted, restore the placeholder row
+    // so users can re-enter the score from the UI.
+    const repairStmts = [];
+    const isFinalRoundMap = Object.fromEntries(roundsRes.rows.map(r => [r.round, r.round_name === 'Final']));
+    for (const r of roundsRes.rows) {
+      if (r.round_name === 'Final') continue; // Final is single-leg, skip
+      const roundFix = fixRes.rows.filter(f => f.round === r.round);
+      const matchNums = [...new Set(roundFix.map(f => f.match_number))];
+      for (const mn of matchNums) {
+        const matchLegs = roundFix.filter(f => f.match_number === mn);
+        const hasLeg1 = matchLegs.some(f => f.leg === 1);
+        const hasLeg2 = matchLegs.some(f => f.leg === 2);
+        if (hasLeg1 && !hasLeg2) {
+          // leg 2 was deleted — recreate it with swapped home/away from leg 1
+          const leg1 = matchLegs.find(f => f.leg === 1);
+          repairStmts.push({
+            sql: 'INSERT INTO fixtures (id,tournament_id,home_team_id,away_team_id,fixture_type,round,match_number,leg,group_name) VALUES (?,?,?,?,?,?,?,?,?)',
+            args: [uuidv4(), req.params.tId, leg1.away_team_id, leg1.home_team_id, 'knockout', r.round, mn, 2, null]
+          });
+        }
+      }
+    }
+    if (repairStmts.length > 0) {
+      await db.batch(repairStmts, 'write');
+    }
+
+    // Re-fetch fixtures if we made repairs
+    const allFix = repairStmts.length > 0
+      ? (await db.execute({ sql: 'SELECT * FROM fixtures WHERE tournament_id=? AND fixture_type=? ORDER BY round,match_number,leg', args: [req.params.tId, 'knockout'] })).rows
+      : fixRes.rows;
+
     const bracket = roundsRes.rows.map(r => {
-      const roundFixtures = fixRes.rows.filter(f => f.round === r.round);
+      const roundFixtures = allFix.filter(f => f.round === r.round);
       const matchNums = [...new Set(roundFixtures.map(f => f.match_number))];
       const isFinalRound = r.round_name === 'Final';
 
