@@ -20,9 +20,13 @@ axios.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err.response?.status === 401) {
-      localStorage.removeItem('fp_user');
-      // Force a full page reload so App re-renders to the login screen
-      window.location.href = '/';
+      // Don't redirect if we're on the admin page or if it's an admin login attempt
+      const isAdminPage = window.location.pathname.startsWith('/admin');
+      const isLoginAttempt = err.config?.url?.includes('/auth/login') || err.config?.url?.includes('/admin/');
+      if (!isAdminPage && !isLoginAttempt) {
+        localStorage.removeItem('fp_user');
+        window.location.href = '/';
+      }
     }
     return Promise.reject(err);
   }
