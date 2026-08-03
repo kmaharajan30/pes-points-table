@@ -3,7 +3,7 @@ import {
   Box, Button, Card, CardContent, CardActionArea,
   Dialog, DialogTitle, DialogContent, DialogActions,
   TextField, Typography, IconButton, Tooltip, ToggleButton, ToggleButtonGroup,
-  useMediaQuery
+  useMediaQuery, Checkbox, FormControlLabel, Chip
 } from '@mui/material';
 import { useTheme, keyframes } from '@mui/material/styles';
 import AddRoundedIcon from '@mui/icons-material/AddRounded';
@@ -13,11 +13,13 @@ import ArrowForwardRoundedIcon from '@mui/icons-material/ArrowForwardRounded';
 import SportsSoccerRoundedIcon from '@mui/icons-material/SportsSoccerRounded';
 import AccountTreeRoundedIcon from '@mui/icons-material/AccountTreeRounded';
 import GroupsRoundedIcon from '@mui/icons-material/GroupsRounded';
+import CheckBoxRoundedIcon from '@mui/icons-material/CheckBoxRounded';
+import CheckBoxOutlineBlankRoundedIcon from '@mui/icons-material/CheckBoxOutlineBlankRounded';
 import PageHeader from '../components/PageHeader';
 import EmptyState from '../components/EmptyState';
 import ConfirmDialog from '../components/ConfirmDialog';
 import LoadingState from '../components/LoadingState';
-import { getTournaments, createTournament, deleteTournament } from '../api/footballApi';
+import { getTournaments, createTournament, deleteTournament, getGlobalTeams } from '../api/footballApi';
 
 const goldShimmer = keyframes`
   0% { background-position: -200% center; }
@@ -34,7 +36,7 @@ const starTwinkle = keyframes`
   50% { opacity: 1; transform: scale(1.2); }
 `;
 
-export default function TournamentsPage({ onSelect }) {
+export default function TournamentsPage({ onSelect, isAdmin }) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
@@ -43,6 +45,8 @@ export default function TournamentsPage({ onSelect }) {
   const [open, setOpen]               = useState(false);
   const [form, setForm]               = useState({ name:'', season:'', type:'league', num_groups: 2, legs: 2 });
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [globalTeams, setGlobalTeams] = useState([]);
+  const [selectedTeamIds, setSelectedTeamIds] = useState([]);
 
   const load = async () => {
     try { const r = await getTournaments(); setTournaments(r.data); } catch {}
@@ -50,10 +54,33 @@ export default function TournamentsPage({ onSelect }) {
   };
   useEffect(() => { load(); }, []);
 
+  const loadGlobalTeams = async () => {
+    try { const r = await getGlobalTeams(); setGlobalTeams(r.data); } catch {}
+  };
+
+  const handleOpenCreate = () => {
+    loadGlobalTeams();
+    setSelectedTeamIds([]);
+    setOpen(true);
+  };
+
+  const toggleTeam = (id) => {
+    setSelectedTeamIds(prev => prev.includes(id) ? prev.filter(t => t !== id) : [...prev, id]);
+  };
+
+  const toggleAll = () => {
+    if (selectedTeamIds.length === globalTeams.length) {
+      setSelectedTeamIds([]);
+    } else {
+      setSelectedTeamIds(globalTeams.map(t => t.id));
+    }
+  };
+
   const handleCreate = async () => {
     if (!form.name.trim()) return;
-    await createTournament(form);
+    await createTournament({ ...form, teamIds: selectedTeamIds });
     setForm({ name:'', season:'', type:'league', num_groups: 2, legs: 2 });
+    setSelectedTeamIds([]);
     setOpen(false);
     load();
   };
@@ -71,7 +98,7 @@ export default function TournamentsPage({ onSelect }) {
         action={
           <Button variant="contained" size="small"
             startIcon={<AddRoundedIcon sx={{ fontSize:'16px !important' }} />}
-            onClick={()=>setOpen(true)}
+            onClick={()=>handleOpenCreate()}
             sx={{ background:'linear-gradient(135deg,#00e676,#00b248)', color:'#000',
               fontSize:{ xs:11, sm:13 }, px:{ xs:1.5, sm:2 }, py:{ xs:0.6, sm:0.75 }, minWidth:0 }}>
             <Box component="span" sx={{ display:{ xs:'none', sm:'inline' } }}>New&nbsp;</Box>Tournament
@@ -168,10 +195,12 @@ export default function TournamentsPage({ onSelect }) {
 
                       {/* Right: Actions */}
                       <Box sx={{ display:'flex', alignItems:'center', gap:0.5, flexShrink:0 }}>
-                        <IconButton size="small" onClick={e=>{ e.stopPropagation(); setDeleteTarget(t); }}
-                          sx={{ color:'rgba(255,82,82,0.6)', p:0.5, '&:hover':{ bgcolor:'rgba(255,82,82,0.1)', color:'#ff5252' } }}>
-                          <DeleteOutlineRoundedIcon sx={{ fontSize:{ xs:17, sm:19 } }} />
-                        </IconButton>
+                        {isAdmin && (
+                          <IconButton size="small" onClick={e=>{ e.stopPropagation(); setDeleteTarget(t); }}
+                            sx={{ color:'rgba(255,82,82,0.6)', p:0.5, '&:hover':{ bgcolor:'rgba(255,82,82,0.1)', color:'#ff5252' } }}>
+                            <DeleteOutlineRoundedIcon sx={{ fontSize:{ xs:17, sm:19 } }} />
+                          </IconButton>
+                        )}
                         <ArrowForwardRoundedIcon sx={{ color:'rgba(255,255,255,0.25)', fontSize:{ xs:17, sm:19 } }} />
                       </Box>
                     </Box>
@@ -281,6 +310,63 @@ export default function TournamentsPage({ onSelect }) {
                 )}
               </Box>
             )}
+          </Box>
+
+          {/* Team Selection */}
+          <Box>
+            <Box sx={{ display:'flex', alignItems:'center', justifyContent:'space-between', mb:0.75 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ fontWeight:600 }}>
+                Select Teams {selectedTeamIds.length > 0 && `(${selectedTeamIds.length})`}
+              </Typography>
+              {globalTeams.length > 0 && (
+                <Button size="small" onClick={toggleAll}
+                  sx={{ fontSize:10, minWidth:0, px:1, py:0.25, textTransform:'none', color:'primary.main' }}>
+                  {selectedTeamIds.length === globalTeams.length ? 'Deselect All' : 'Select All'}
+                </Button>
+              )}
+            </Box>
+            {globalTeams.length === 0 ? (
+              <Typography variant="caption" color="text.secondary" sx={{ fontSize:11 }}>
+                No global teams available. Add teams from the Teams tab first.
+              </Typography>
+            ) : (
+              <Box sx={{
+                maxHeight: 200, overflowY: 'auto', borderRadius: 2,
+                border: '1px solid rgba(255,255,255,0.1)',
+                background: 'rgba(255,255,255,0.02)',
+                p: 1,
+              }}>
+                <Box sx={{ display:'flex', flexWrap:'wrap', gap:0.75 }}>
+                  {globalTeams.map(team => {
+                    const selected = selectedTeamIds.includes(team.id);
+                    return (
+                      <Chip
+                        key={team.id}
+                        label={team.name}
+                        size="small"
+                        onClick={() => toggleTeam(team.id)}
+                        icon={selected
+                          ? <CheckBoxRoundedIcon sx={{ fontSize:'16px !important' }} />
+                          : <CheckBoxOutlineBlankRoundedIcon sx={{ fontSize:'16px !important' }} />
+                        }
+                        sx={{
+                          fontWeight: 600, fontSize: 11,
+                          borderColor: selected ? 'primary.main' : 'rgba(255,255,255,0.15)',
+                          bgcolor: selected ? 'rgba(0,230,118,0.12)' : 'transparent',
+                          color: selected ? '#00e676' : 'rgba(255,255,255,0.7)',
+                          border: '1px solid',
+                          '&:hover': { bgcolor: selected ? 'rgba(0,230,118,0.2)' : 'rgba(255,255,255,0.06)' },
+                          '& .MuiChip-icon': { color: selected ? '#00e676' : 'rgba(255,255,255,0.4)' },
+                        }}
+                      />
+                    );
+                  })}
+                </Box>
+              </Box>
+            )}
+            <Typography variant="caption" color="text.secondary" sx={{ mt:0.5, display:'block', fontSize:10 }}>
+              Selected teams will be added to the tournament automatically. You can still add more later.
+            </Typography>
           </Box>
         </DialogContent>
         <DialogActions sx={{ px:2.5, pb:2.5, gap:1 }}>

@@ -115,7 +115,7 @@ function ResultDialog({ open, fixture, onSave, onClose }) {
 }
 
 // ─── Single fixture card ──────────────────────────────────────────────────────
-function FixtureCard({ fixture, onResult, onDelete }) {
+function FixtureCard({ fixture, onResult, onDelete, isAdmin }) {
   const homeName = fixture.homeTeam?.name || '?';
   const awayName = fixture.awayTeam?.name || '?';
   return (
@@ -149,10 +149,12 @@ function FixtureCard({ fixture, onResult, onDelete }) {
               sx={{ color:'primary.main', p:0.5, '&:hover':{ bgcolor:'rgba(0,230,118,0.1)' } }}>
               <EditNoteRoundedIcon sx={{ fontSize:18 }} />
             </IconButton>
-            <IconButton size="small" onClick={()=>onDelete(fixture)}
-              sx={{ color:'error.main', p:0.5, '&:hover':{ bgcolor:'rgba(255,82,82,0.1)' } }}>
-              <DeleteOutlineRoundedIcon sx={{ fontSize:18 }} />
-            </IconButton>
+            {isAdmin && (
+              <IconButton size="small" onClick={()=>onDelete(fixture)}
+                sx={{ color:'error.main', p:0.5, '&:hover':{ bgcolor:'rgba(255,82,82,0.1)' } }}>
+                <DeleteOutlineRoundedIcon sx={{ fontSize:18 }} />
+              </IconButton>
+            )}
           </Box>
         </Box>
         {fixture.date && (
@@ -167,7 +169,7 @@ function FixtureCard({ fixture, onResult, onDelete }) {
 }
 
 // ─── League Fixtures View ─────────────────────────────────────────────────────
-function LeagueFixtures({ tournament, teams, fixtures, onResult, onDelete, onRegenerate, generating }) {
+function LeagueFixtures({ tournament, teams, fixtures, onResult, onDelete, onRegenerate, generating, isAdmin }) {
   const theme    = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const [addOpen, setAddOpen] = useState(false);
@@ -213,7 +215,7 @@ function LeagueFixtures({ tournament, teams, fixtures, onResult, onDelete, onReg
                 sx={{ letterSpacing:1.5, mb:1, display:'block', fontSize:9 }}>
                 First Leg · {leg1.filter(f=>f.played).length}/{leg1.length} played
               </Typography>
-              <Stack spacing={1}>{leg1.map(f=><FixtureCard key={f.id} fixture={f} onResult={onResult} onDelete={onDelete} />)}</Stack>
+              <Stack spacing={1}>{leg1.map(f=><FixtureCard key={f.id} fixture={f} onResult={onResult} onDelete={onDelete} isAdmin={isAdmin} />)}</Stack>
             </Box>
           )}
           {leg2.length>0 && (
@@ -222,7 +224,7 @@ function LeagueFixtures({ tournament, teams, fixtures, onResult, onDelete, onReg
                 sx={{ letterSpacing:1.5, mb:1, display:'block', fontSize:9 }}>
                 Second Leg · {leg2.filter(f=>f.played).length}/{leg2.length} played
               </Typography>
-              <Stack spacing={1}>{leg2.map(f=><FixtureCard key={f.id} fixture={f} onResult={onResult} onDelete={onDelete} />)}</Stack>
+              <Stack spacing={1}>{leg2.map(f=><FixtureCard key={f.id} fixture={f} onResult={onResult} onDelete={onDelete} isAdmin={isAdmin} />)}</Stack>
             </Box>
           )}
         </Stack>
@@ -270,7 +272,7 @@ function LeagueFixtures({ tournament, teams, fixtures, onResult, onDelete, onReg
 }
 
 // ─── Knockout Bracket View ────────────────────────────────────────────────────
-function KnockoutBracket({ tournament, teams, bracket, onResult, onDelete, onAdvance, advancing, onRegenerate, generating }) {
+function KnockoutBracket({ tournament, teams, bracket, onResult, onDelete, onAdvance, advancing, onRegenerate, generating, isAdmin }) {
   if (!bracket || bracket.length===0) {
     return (
       <Box>
@@ -452,10 +454,12 @@ function KnockoutMatch({ match, onResult, onDelete, isCurrentRound }) {
                     sx={{ color:'primary.main', p:0.4,'&:hover':{ background:'rgba(0,230,118,0.1)' } }}>
                     <EditNoteRoundedIcon sx={{ fontSize:16 }} />
                   </IconButton>
-                  <IconButton size="small" onClick={()=>onDelete(leg)}
-                    sx={{ color:'error.main', p:0.4,'&:hover':{ background:'rgba(255,82,82,0.1)' } }}>
-                    <DeleteOutlineRoundedIcon sx={{ fontSize:16 }} />
-                  </IconButton>
+                  {isAdmin && (
+                    <IconButton size="small" onClick={()=>onDelete(leg)}
+                      sx={{ color:'error.main', p:0.4,'&:hover':{ background:'rgba(255,82,82,0.1)' } }}>
+                      <DeleteOutlineRoundedIcon sx={{ fontSize:16 }} />
+                    </IconButton>
+                  )}
                 </Box>
               )}
             </Box>
@@ -488,7 +492,7 @@ function KnockoutMatch({ match, onResult, onDelete, isCurrentRound }) {
 }
 
 // ─── Main FixturesPage ────────────────────────────────────────────────────────
-export default function FixturesPage({ tournament }) {
+export default function FixturesPage({ tournament, isAdmin }) {
   const isKnockout = tournament.type === 'knockout';
 
   const [fixtures,    setFixtures]   = useState([]);
@@ -592,12 +596,14 @@ export default function FixturesPage({ tournament }) {
           onResult={setResultFix} onDelete={setDeleteFix}
           onAdvance={handleAdvance} advancing={advancing}
           onRegenerate={handleGenerate} generating={generating}
+          isAdmin={isAdmin}
         />
       ) : (
         <LeagueFixtures
           tournament={tournament} teams={teams} fixtures={leagueFixtures}
           onResult={setResultFix} onDelete={setDeleteFix}
           onRegenerate={handleGenerate} generating={generating}
+          isAdmin={isAdmin}
         />
       )}
 

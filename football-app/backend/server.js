@@ -50,6 +50,11 @@ async function requireAuth(req, res, next) {
   }
 }
 
+function requireAdmin(req, res, next) {
+  if (req.user.is_admin !== 1) return res.status(403).json({ error: 'Admin access required' });
+  next();
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 function enrichFixture(f, tm) {
   return {
@@ -225,11 +230,47 @@ app.post('/api/auth/login', async (req, res) => {
     const existing = await db.execute({ sql: 'SELECT * FROM users WHERE code=? AND LOWER(name)=LOWER(?)', args: [c, n] });
     if (existing.rows.length > 0) {
       const u = existing.rows[0];
-      return res.json({ user: { id: u.id, name: u.name, code: u.code } });
+      return res.json({ user: { id: u.id, name: u.name, code: u.code, isAdmin: u.is_admin === 1 } });
     }
     const user = { id: uuidv4(), name: n, code: c, created_at: new Date().toISOString() };
     await db.execute({ sql: 'INSERT INTO users (id,name,code,created_at) VALUES (?,?,?,?)', args: [user.id, user.name, user.code, user.created_at] });
-    res.status(201).json({ user: { id: user.id, name: user.name, code: user.code } });
+    res.status(201).json({ user: { id: user.id, name: user.name, code: user.code, isAdmin: false } });
+  } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
+});
+
+// ─── Admin Auth ───────────────────────────────────────────────────────────────
+app.post('/api/admin/create', async (req, res) => {
+  try {
+    const { name, code, adminKey } = req.body;
+    if (!name || !code || !adminKey) return res.status(400).json({ error: 'Name, code, and admin key required' });
+    if (code.trim().length < 4) return res.status(400).json({ error: 'Code must be ≥ 4 characters' });
+    // Validate admin key against DB
+    const keyCheck = await db.execute({ sql: 'SELECT id FROM admin_keys WHERE key=?', args: [adminKey.trim()] });
+    if (keyCheck.rows.length === 0) return res.status(403).json({ error: 'Invalid admin key' });
+    const [n, c] = [name.trim().toLowerCase(), code.trim()];
+    // Check if user already exists
+    const existing = await db.execute({ sql: 'SELECT * FROM users WHERE code=? AND LOWER(name)=LOWER(?)', args: [c, n] });
+    if (existing.rows.length > 0) {
+      // Upgrade to admin if not already
+      await db.execute({ sql: 'UPDATE users SET is_admin=1 WHERE id=?', args: [existing.rows[0].id] });
+      const u = existing.rows[0];
+      return res.json({ user: { id: u.id, name: u.name, code: u.code, isAdmin: true } });
+    }
+    const user = { id: uuidv4(), name: n, code: c, created_at: new Date().toISOString() };
+    await db.execute({ sql: 'INSERT INTO users (id,name,code,created_at,is_admin) VALUES (?,?,?,?,1)', args: [user.id, user.name, user.code, user.created_at] });
+    res.status(201).json({ user: { id: user.id, name: user.name, code: user.code, isAdmin: true } });
+  } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
+});
+
+app.post('/api/admin/login', async (req, res) => {
+  try {
+    const { name, code } = req.body;
+    if (!name || !code) return res.status(400).json({ error: 'Name and code required' });
+    const [n, c] = [name.trim().toLowerCase(), code.trim()];
+    const existing = await db.execute({ sql: 'SELECT * FROM users WHERE code=? AND LOWER(name)=LOWER(?) AND is_admin=1', args: [c, n] });
+    if (existing.rows.length === 0) return res.status(401).json({ error: 'Invalid admin credentials' });
+    const u = existing.rows[0];
+    res.json({ user: { id: u.id, name: u.name, code: u.code, isAdmin: true } });
   } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
 });
 
@@ -317,7 +358,7 @@ app.get('/api/tournaments', requireAuth, async (req, res) => {
 
 app.post('/api/tournaments', requireAuth, async (req, res) => {
   try {
-    const { name, season, type='league', num_groups=2, legs=2 } = req.body;
+    const { name, season, type='league', num_groups=2, legs=2, teamIds=[] } = req.body;
     if (!name) return res.status(400).json({ error: 'Name required' });
     if (!['league','knockout','group_knockout'].includes(type)) return res.status(400).json({ error: 'type must be league, knockout, or group_knockout' });
     // Prevent duplicate tournament names (case-insensitive) within same group
@@ -327,15 +368,70 @@ app.post('/api/tournaments', requireAuth, async (req, res) => {
     const numLegs   = type === 'group_knockout' ? (parseInt(legs)===1 ? 1 : 2) : (type === 'league' ? (parseInt(legs)===1 ? 1 : 2) : null);
     const t = { id:uuidv4(), code:req.user.code, name:name.trim(), season:season||'', type, num_groups:numGroups, legs:numLegs, created_at:new Date().toISOString() };
     await db.execute({ sql: 'INSERT INTO tournaments (id,code,name,season,type,num_groups,legs,created_at) VALUES (?,?,?,?,?,?,?,?)', args: [t.id,t.code,t.name,t.season,t.type,t.num_groups,t.legs,t.created_at] });
+
+    // If global team IDs provided, copy them into this tournament
+    if (Array.isArray(teamIds) && teamIds.length > 0) {
+      const globalTeams = await db.execute({ sql: `SELECT * FROM global_teams WHERE code=? AND id IN (${teamIds.map(()=>'?').join(',')})`, args: [req.user.code, ...teamIds] });
+      if (globalTeams.rows.length > 0) {
+        const stmts = globalTeams.rows.map(gt => ({
+          sql: 'INSERT INTO teams (id,tournament_id,name) VALUES (?,?,?)',
+          args: [uuidv4(), t.id, gt.name]
+        }));
+        await db.batch(stmts, 'write');
+      }
+    }
+
     res.status(201).json({ id:t.id, name:t.name, season:t.season, type:t.type, numGroups:t.num_groups, legs:t.legs, createdAt:t.created_at });
   } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
 });
 
-app.delete('/api/tournaments/:id', requireAuth, async (req, res) => {
+app.delete('/api/tournaments/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
     const result = await db.execute({ sql: 'SELECT * FROM tournaments WHERE id=? AND code=?', args: [req.params.id, req.user.code] });
     if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     await db.execute({ sql: 'DELETE FROM tournaments WHERE id=?', args: [req.params.id] });
+    res.json({ message: 'Deleted' });
+  } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
+});
+
+// ─── Global Teams ─────────────────────────────────────────────────────────────
+app.get('/api/global-teams', requireAuth, async (req, res) => {
+  try {
+    const result = await db.execute({ sql: 'SELECT * FROM global_teams WHERE code=? ORDER BY name ASC', args: [req.user.code] });
+    res.json(result.rows.map(r => ({ id: r.id, name: r.name, createdAt: r.created_at })));
+  } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
+});
+
+app.post('/api/global-teams', requireAuth, async (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: 'Name required' });
+    const dupCheck = await db.execute({ sql: 'SELECT id FROM global_teams WHERE code=? AND LOWER(name)=LOWER(?)', args: [req.user.code, name.trim()] });
+    if (dupCheck.rows.length > 0) return res.status(400).json({ error: 'Team with this name already exists' });
+    const team = { id: uuidv4(), code: req.user.code, name: name.trim(), created_at: new Date().toISOString() };
+    await db.execute({ sql: 'INSERT INTO global_teams (id,code,name,created_at) VALUES (?,?,?,?)', args: [team.id, team.code, team.name, team.created_at] });
+    res.status(201).json({ id: team.id, name: team.name, createdAt: team.created_at });
+  } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
+});
+
+app.put('/api/global-teams/:id', requireAuth, async (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: 'Name required' });
+    const existing = await db.execute({ sql: 'SELECT * FROM global_teams WHERE id=? AND code=?', args: [req.params.id, req.user.code] });
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Team not found' });
+    const dupCheck = await db.execute({ sql: 'SELECT id FROM global_teams WHERE code=? AND LOWER(name)=LOWER(?) AND id!=?', args: [req.user.code, name.trim(), req.params.id] });
+    if (dupCheck.rows.length > 0) return res.status(400).json({ error: 'Team with this name already exists' });
+    await db.execute({ sql: 'UPDATE global_teams SET name=? WHERE id=?', args: [name.trim(), req.params.id] });
+    res.json({ id: req.params.id, name: name.trim() });
+  } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
+});
+
+app.delete('/api/global-teams/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const existing = await db.execute({ sql: 'SELECT * FROM global_teams WHERE id=? AND code=?', args: [req.params.id, req.user.code] });
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Team not found' });
+    await db.execute({ sql: 'DELETE FROM global_teams WHERE id=?', args: [req.params.id] });
     res.json({ message: 'Deleted' });
   } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
 });
@@ -374,7 +470,7 @@ app.put('/api/tournaments/:tId/teams/:teamId', requireAuth, async (req, res) => 
   } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
 });
 
-app.delete('/api/tournaments/:tId/teams/:teamId', requireAuth, async (req, res) => {
+app.delete('/api/tournaments/:tId/teams/:teamId', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { teamId } = req.params;
     await db.execute({ sql: 'DELETE FROM fixtures WHERE home_team_id=? OR away_team_id=?', args: [teamId, teamId] });
@@ -597,7 +693,7 @@ app.put('/api/tournaments/:tId/fixtures/:fId/result', requireAuth, async (req, r
   } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
 });
 
-app.delete('/api/tournaments/:tId/fixtures/:fId', requireAuth, async (req, res) => {
+app.delete('/api/tournaments/:tId/fixtures/:fId', requireAuth, requireAdmin, async (req, res) => {
   try {
     // Check the fixture type before deleting
     const check = await db.execute({ sql: 'SELECT fixture_type FROM fixtures WHERE id=?', args: [req.params.fId] });
@@ -1226,6 +1322,22 @@ async function startServer() {
     round INTEGER NOT NULL, round_name TEXT NOT NULL,
     FOREIGN KEY (tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE
   )`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS global_teams (
+    id TEXT PRIMARY KEY, code TEXT NOT NULL,
+    name TEXT NOT NULL, created_at TEXT NOT NULL
+  )`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS admin_keys (
+    id TEXT PRIMARY KEY, key TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL
+  )`);
+  // Add is_admin column if not exists (safe for existing DBs)
+  try {
+    await db.execute(`ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0`);
+  } catch(_) { /* column already exists */ }
+  // Seed the admin key if not present
+  const existingKey = await db.execute({ sql: "SELECT id FROM admin_keys WHERE key=?", args: ['Admin@3012'] });
+  if (existingKey.rows.length === 0) {
+    await db.execute({ sql: "INSERT INTO admin_keys (id, key, created_at) VALUES (?, ?, ?)", args: [uuidv4(), 'Admin@3012', new Date().toISOString()] });
+  }
 
   const PORT = process.env.PORT || 5000;
   app.listen(PORT, () => console.log(`⚽  Football API on :${PORT}`));

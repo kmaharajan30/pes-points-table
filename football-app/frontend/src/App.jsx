@@ -16,24 +16,23 @@ import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded';
 import StarRoundedIcon from '@mui/icons-material/StarRounded';
 import theme from './theme/theme';
 import LoginPage from './pages/LoginPage';
+import AdminLoginPage from './pages/AdminLoginPage';
 import TournamentsPage from './pages/TournamentsPage';
-import TeamsPage from './pages/TeamsPage';
 import FixturesPage from './pages/FixturesPage';
 import PointsTablePage from './pages/PointsTablePage';
 import GroupKnockoutPage from './pages/GroupKnockoutPage';
 import TopStatsPage from './pages/TopStatsPage';
+import GlobalTeamsPage from './pages/GlobalTeamsPage';
 import ActiveUsers from './components/ActiveUsers';
 
 const DRAWER_WIDTH = 248;
 
 const NAV_ITEMS = [
-  { key: 'teams',    label: 'Teams',   icon: <GroupsRoundedIcon /> },
   { key: 'fixtures', label: 'Fixtures',icon: <SportsSoccerRoundedIcon /> },
   { key: 'table',    label: 'Table',   icon: <LeaderboardRoundedIcon /> },
 ];
 
 const NAV_ITEMS_GK = [
-  { key: 'teams',    label: 'Teams',    icon: <GroupsRoundedIcon /> },
   { key: 'fixtures', label: 'Fixtures', icon: <SportsSoccerRoundedIcon /> },
   { key: 'table',    label: 'Table',    icon: <LeaderboardRoundedIcon /> },
 ];
@@ -45,11 +44,13 @@ function getInitials(name = '') {
 export default function App() {
   const [user, setUser] = useState(() => JSON.parse(localStorage.getItem('fp_user') || 'null'));
   const [activeTournament, setActiveTournament] = useState(null);
-  const [activeTab, setActiveTab] = useState('teams');
+  const [activeTab, setActiveTab] = useState('fixtures');
   const [globalTab, setGlobalTab] = useState('tournaments');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState(null);
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const isAdminRoute = window.location.pathname.startsWith('/admin');
+  const isAdmin = user?.isAdmin === true;
 
   useEffect(() => {
     const stored = JSON.parse(localStorage.getItem('fp_user') || 'null');
@@ -61,7 +62,7 @@ export default function App() {
 
   const handleLogin    = (u) => setUser(u);
   const handleLogout   = () => { localStorage.removeItem('fp_user'); setUser(null); setActiveTournament(null); setAnchorEl(null); };
-  const handleSelect   = (t) => { setActiveTournament(t); setActiveTab('teams'); setDrawerOpen(false); };
+  const handleSelect   = (t) => { setActiveTournament(t); setActiveTab('fixtures'); setDrawerOpen(false); };
   const handleBack     = () => { setActiveTournament(null); setGlobalTab('tournaments'); setDrawerOpen(false); };
 
   const drawerContent = (
@@ -92,6 +93,19 @@ export default function App() {
               '&:hover':{ background:'rgba(255,255,255,0.04)' } }}>
             <ListItemIcon sx={{ minWidth:32 }}><EmojiEventsRoundedIcon sx={{ fontSize:18 }} /></ListItemIcon>
             <ListItemText primary="Tournaments" primaryTypographyProps={{ fontSize:13 }} />
+          </ListItemButton>
+        </ListItem>
+        <ListItem disablePadding>
+          <ListItemButton selected={!activeTournament && globalTab === 'teams'}
+            onClick={()=>{ setActiveTournament(null); setGlobalTab('teams'); setDrawerOpen(false); }}
+            sx={{ borderRadius:1.5, mb:0.25, py:0.75,
+              '&.Mui-selected':{ background:'linear-gradient(90deg,rgba(0,230,118,0.15),rgba(101,31,255,0.08))',
+                borderLeft:'3px solid #40c4ff',
+                '& .MuiListItemIcon-root':{ color:'#40c4ff' },
+                '& .MuiListItemText-primary':{ color:'#40c4ff', fontWeight:700 } },
+              '&:hover':{ background:'rgba(255,255,255,0.04)' } }}>
+            <ListItemIcon sx={{ minWidth:32 }}><GroupsRoundedIcon sx={{ fontSize:18 }} /></ListItemIcon>
+            <ListItemText primary="Teams" primaryTypographyProps={{ fontSize:13 }} />
           </ListItemButton>
         </ListItem>
         <ListItem disablePadding>
@@ -174,18 +188,17 @@ export default function App() {
   const renderPage = () => {
     if (!activeTournament) {
       if (globalTab === 'stats') return <TopStatsPage />;
-      return <TournamentsPage onSelect={handleSelect} />;
+      if (globalTab === 'teams') return <GlobalTeamsPage isAdmin={isAdmin} />;
+      return <TournamentsPage onSelect={handleSelect} isAdmin={isAdmin} />;
     }
     if (activeTournament.type === 'group_knockout') {
-      if (activeTab === 'teams')    return <TeamsPage tournament={activeTournament} />;
-      if (activeTab === 'table')    return <GroupKnockoutPage tournament={activeTournament} view="table" />;
-      return <GroupKnockoutPage tournament={activeTournament} view="fixtures" />;
+      if (activeTab === 'table')    return <GroupKnockoutPage tournament={activeTournament} view="table" isAdmin={isAdmin} />;
+      return <GroupKnockoutPage tournament={activeTournament} view="fixtures" isAdmin={isAdmin} />;
     }
     switch (activeTab) {
-      case 'teams':    return <TeamsPage tournament={activeTournament} />;
-      case 'fixtures': return <FixturesPage tournament={activeTournament} />;
+      case 'fixtures': return <FixturesPage tournament={activeTournament} isAdmin={isAdmin} />;
       case 'table':    return <PointsTablePage tournament={activeTournament} />;
-      default:         return <TeamsPage tournament={activeTournament} />;
+      default:         return <FixturesPage tournament={activeTournament} isAdmin={isAdmin} />;
     }
   };
 
@@ -193,7 +206,9 @@ export default function App() {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       {!user ? (
-        <LoginPage onLogin={handleLogin} />
+        isAdminRoute ? <AdminLoginPage onLogin={handleLogin} /> : <LoginPage onLogin={handleLogin} />
+      ) : isAdminRoute && !isAdmin ? (
+        <AdminLoginPage onLogin={handleLogin} />
       ) : (
         <Box sx={{ display:'flex', minHeight:'100vh', bgcolor:'background.default' }}>
 

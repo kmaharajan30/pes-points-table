@@ -32,6 +32,16 @@ axios.interceptors.response.use(
 export const login           = (data) => axios.post(`${BASE}/auth/login`, data);
 export const getGroupMembers = ()     => axios.get(`${BASE}/auth/group-members`);
 
+// Admin Auth
+export const adminCreate = (data) => axios.post(`${BASE}/admin/create`, data);
+export const adminLogin  = (data) => axios.post(`${BASE}/admin/login`, data);
+
+// Global Teams
+export const getGlobalTeams    = ()           => axios.get(`${BASE}/global-teams`);
+export const createGlobalTeam  = (data)       => axios.post(`${BASE}/global-teams`, data);
+export const renameGlobalTeam  = (id, data)   => axios.put(`${BASE}/global-teams/${id}`, data);
+export const deleteGlobalTeam  = (id)         => axios.delete(`${BASE}/global-teams/${id}`);
+
 // Tournaments
 export const getTournaments    = ()     => axios.get(`${BASE}/tournaments`);
 export const createTournament  = (data) => axios.post(`${BASE}/tournaments`, data);

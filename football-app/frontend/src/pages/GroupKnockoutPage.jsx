@@ -173,7 +173,7 @@ function GroupTable({ groupName, table, qualifyCount = 2, qualifyRound = 'Semi-F
 }
 
 // ── Fixture Card (group stage) ─────────────────────────────────────────────────
-function GroupFixtureCard({ fixture, onResult, onDelete }) {
+function GroupFixtureCard({ fixture, onResult, onDelete, isAdmin }) {
   const home = fixture.homeTeam?.name || '?';
   const away = fixture.awayTeam?.name || '?';
   return (
@@ -197,10 +197,12 @@ function GroupFixtureCard({ fixture, onResult, onDelete }) {
               sx={{ color:'primary.main', p:0.5, '&:hover':{ bgcolor:'rgba(0,230,118,0.1)' } }}>
               <EditNoteRoundedIcon sx={{ fontSize:18 }} />
             </IconButton>
-            <IconButton size="small" onClick={()=>onDelete(fixture)}
-              sx={{ color:'error.main', p:0.5, '&:hover':{ bgcolor:'rgba(255,82,82,0.1)' } }}>
-              <DeleteOutlineRoundedIcon sx={{ fontSize:18 }} />
-            </IconButton>
+            {isAdmin && (
+              <IconButton size="small" onClick={()=>onDelete(fixture)}
+                sx={{ color:'error.main', p:0.5, '&:hover':{ bgcolor:'rgba(255,82,82,0.1)' } }}>
+                <DeleteOutlineRoundedIcon sx={{ fontSize:18 }} />
+              </IconButton>
+            )}
           </Box>
         </Box>
       </CardContent>
@@ -209,7 +211,7 @@ function GroupFixtureCard({ fixture, onResult, onDelete }) {
 }
 
 // ── Knockout Match Card ────────────────────────────────────────────────────────
-function KoMatchCard({ match, onResult, onDelete, isActive }) {
+function KoMatchCard({ match, onResult, onDelete, isActive, isAdmin }) {
   const home = match.homeTeam?.name;
   const away = match.awayTeam?.name;
   const both = match.leg1?.played && (match.isFinal || match.leg2?.played);
@@ -286,10 +288,12 @@ function KoMatchCard({ match, onResult, onDelete, isActive }) {
                       sx={{ color:'primary.main', p:0.4, '&:hover':{ bgcolor:'rgba(0,230,118,0.1)' } }}>
                       <EditNoteRoundedIcon sx={{ fontSize:16 }} />
                     </IconButton>
-                    <IconButton size="small" onClick={()=>onDelete(leg)}
-                      sx={{ color:'error.main', p:0.4, '&:hover':{ bgcolor:'rgba(255,82,82,0.1)' } }}>
-                      <DeleteOutlineRoundedIcon sx={{ fontSize:16 }} />
-                    </IconButton>
+                    {isAdmin && (
+                      <IconButton size="small" onClick={()=>onDelete(leg)}
+                        sx={{ color:'error.main', p:0.4, '&:hover':{ bgcolor:'rgba(255,82,82,0.1)' } }}>
+                        <DeleteOutlineRoundedIcon sx={{ fontSize:16 }} />
+                      </IconButton>
+                    )}
                   </Box>
                 )}
               </Box>
@@ -400,7 +404,7 @@ function TableView({ tournament, groupTables, loading, error, setError, bracket 
 }
 
 // ── FIXTURES VIEW ──────────────────────────────────────────────────────────────
-export default function GroupKnockoutPage({ tournament, view = 'fixtures' }) {
+export default function GroupKnockoutPage({ tournament, view = 'fixtures', isAdmin }) {
   // All hooks must be called unconditionally (Rules of Hooks)
   const { groupTables, groupFixtures, bracket, loading, error, setError, load } = useGroupKnockoutData(tournament.id);
 
@@ -621,14 +625,14 @@ export default function GroupKnockoutPage({ tournament, view = 'fixtures' }) {
                           <Typography variant="caption" color="text.secondary"
                             sx={{ fontSize:9, letterSpacing:1, display:'block', mb:0.75, fontWeight:700 }}>FIRST LEG</Typography>
                         )}
-                        <Stack spacing={0.75}>{leg1.map(f=><GroupFixtureCard key={f.id} fixture={f} onResult={setResultFix} onDelete={setDeleteFix} />)}</Stack>
+                        <Stack spacing={0.75}>{leg1.map(f=><GroupFixtureCard key={f.id} fixture={f} onResult={setResultFix} onDelete={setDeleteFix} isAdmin={isAdmin} />)}</Stack>
                       </Box>
                     )}
                     {leg2.length > 0 && (
                       <Box>
                         <Typography variant="caption" color="text.secondary"
                           sx={{ fontSize:9, letterSpacing:1, display:'block', mb:0.75, fontWeight:700 }}>SECOND LEG</Typography>
-                        <Stack spacing={0.75}>{leg2.map(f=><GroupFixtureCard key={f.id} fixture={f} onResult={setResultFix} onDelete={setDeleteFix} />)}</Stack>
+                        <Stack spacing={0.75}>{leg2.map(f=><GroupFixtureCard key={f.id} fixture={f} onResult={setResultFix} onDelete={setDeleteFix} isAdmin={isAdmin} />)}</Stack>
                       </Box>
                     )}
                   </Box>
@@ -674,7 +678,7 @@ export default function GroupKnockoutPage({ tournament, view = 'fixtures' }) {
                         <Stack spacing={1.5}>
                           {round.matches.map(match => (
                             <KoMatchCard key={match.matchNumber} match={match}
-                              onResult={setResultFix} onDelete={setDeleteFix} isActive={isCurrent} />
+                              onResult={setResultFix} onDelete={setDeleteFix} isActive={isCurrent} isAdmin={isAdmin} />
                           ))}
                         </Stack>
                       </Box>
