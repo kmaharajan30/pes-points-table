@@ -59,8 +59,8 @@ export default function RivalTrackerPage() {
 
       {/* Team Selection */}
       <Card sx={{ p: 2, mb: 3, background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.07)' }}>
-        <Box sx={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 2, alignItems: 'flex-end' }}>
-          <FormControl sx={{ flex: 1 }} size="small">
+        <Box sx={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 2, alignItems: isMobile ? 'stretch' : 'flex-end' }}>
+          <FormControl fullWidth={isMobile} sx={{ flex: isMobile ? 'unset' : 1 }} size="small">
             <InputLabel>Team 1</InputLabel>
             <Select value={team1} label="Team 1" onChange={(e) => setTeam1(e.target.value)}
               MenuProps={{ PaperProps: { sx: { maxHeight: 200, '& .MuiMenuItem-root': { py: 0.5, minHeight: 28 } } } }}>
@@ -75,9 +75,9 @@ export default function RivalTrackerPage() {
             </Select>
           </FormControl>
 
-          <CompareArrowsRoundedIcon sx={{ color: 'text.secondary', fontSize: 28, alignSelf: 'center' }} />
+          {!isMobile && <CompareArrowsRoundedIcon sx={{ color: 'text.secondary', fontSize: 28, alignSelf: 'center' }} />}
 
-          <FormControl sx={{ flex: 1 }} size="small">
+          <FormControl fullWidth={isMobile} sx={{ flex: isMobile ? 'unset' : 1 }} size="small">
             <InputLabel>Team 2</InputLabel>
             <Select value={team2} label="Team 2" onChange={(e) => setTeam2(e.target.value)}
               MenuProps={{ PaperProps: { sx: { maxHeight: 200, '& .MuiMenuItem-root': { py: 0.5, minHeight: 28 } } } }}>
@@ -92,7 +92,7 @@ export default function RivalTrackerPage() {
             </Select>
           </FormControl>
 
-          <Button variant="contained" onClick={handleCompare}
+          <Button variant="contained" onClick={handleCompare} fullWidth={isMobile}
             disabled={!team1 || !team2 || team1 === team2 || comparing}
             sx={{ minWidth: 100, fontWeight: 700 }}>
             {comparing ? 'Loading...' : 'Compare'}
@@ -172,49 +172,56 @@ export default function RivalTrackerPage() {
               <Stack spacing={1}>
                 {rivalData.matches.map((m, i) => (
                   <Box key={i} sx={{
-                    display: 'flex', alignItems: 'center', gap: 1.5, p: 1.25, borderRadius: 1.5,
+                    display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'stretch' : 'center',
+                    gap: isMobile ? 0.75 : 1.5, p: 1.25, borderRadius: 1.5,
                     bgcolor: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)',
                   }}>
-                    <Box sx={{ flex: 1, textAlign: 'right', minWidth: 0 }}>
-                      <Typography variant="body2" sx={{ fontWeight: 700, fontSize: 12, color: m.result === 'team1' ? '#00e676' : 'text.primary' }} noWrap>
-                        {team1}
-                      </Typography>
+                    {/* Score row */}
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: isMobile ? 'unset' : 1, justifyContent: 'center' }}>
+                      <Box sx={{ flex: 1, textAlign: 'right', minWidth: 0 }}>
+                        <Typography variant="body2" sx={{ fontWeight: 700, fontSize: 12, color: m.result === 'team1' ? '#00e676' : 'text.primary' }} noWrap>
+                          {team1}
+                        </Typography>
+                      </Box>
+                      <Box sx={{
+                        display: 'flex', alignItems: 'center', gap: 0.5, px: 1.5, py: 0.4, borderRadius: 99,
+                        background: m.result === 'draw' ? 'rgba(255,215,64,0.12)' : 'rgba(0,230,118,0.08)',
+                        border: `1px solid ${m.result === 'draw' ? 'rgba(255,215,64,0.25)' : 'rgba(255,255,255,0.1)'}`,
+                      }}>
+                        <Typography sx={{ fontWeight: 900, fontSize: '0.85rem', color: m.result === 'team1' ? '#00e676' : 'text.secondary' }}>
+                          {m.team1Goals}
+                        </Typography>
+                        <Typography sx={{ fontWeight: 700, color: 'text.secondary', mx: 0.25 }}>–</Typography>
+                        <Typography sx={{ fontWeight: 900, fontSize: '0.85rem', color: m.result === 'team2' ? '#651fff' : 'text.secondary' }}>
+                          {m.team2Goals}
+                        </Typography>
+                      </Box>
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
+                        <Typography variant="body2" sx={{ fontWeight: 700, fontSize: 12, color: m.result === 'team2' ? '#651fff' : 'text.primary' }} noWrap>
+                          {team2}
+                        </Typography>
+                      </Box>
                     </Box>
-                    <Box sx={{
-                      display: 'flex', alignItems: 'center', gap: 0.5, px: 1.5, py: 0.4, borderRadius: 99,
-                      background: m.result === 'draw' ? 'rgba(255,215,64,0.12)' : 'rgba(0,230,118,0.08)',
-                      border: `1px solid ${m.result === 'draw' ? 'rgba(255,215,64,0.25)' : 'rgba(255,255,255,0.1)'}`,
-                    }}>
-                      <Typography sx={{ fontWeight: 900, fontSize: '0.85rem', color: m.result === 'team1' ? '#00e676' : 'text.secondary' }}>
-                        {m.team1Goals}
-                      </Typography>
-                      <Typography sx={{ fontWeight: 700, color: 'text.secondary', mx: 0.25 }}>–</Typography>
-                      <Typography sx={{ fontWeight: 900, fontSize: '0.85rem', color: m.result === 'team2' ? '#651fff' : 'text.secondary' }}>
-                        {m.team2Goals}
-                      </Typography>
+                    {/* Labels row */}
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, justifyContent: isMobile ? 'center' : 'flex-end', flexWrap: 'wrap' }}>
+                      <Chip label={m.tournamentName} size="small"
+                        sx={{ fontSize: 9, fontWeight: 600, bgcolor: 'rgba(255,255,255,0.05)', height: 20 }} />
+                      {m.fixtureType === 'knockout' && (
+                        <Chip
+                          label={m.roundName ? (m.roundName === 'Quarter-Final' ? 'QF' : m.roundName === 'Semi-Final' ? 'SF' : m.roundName === 'Final' ? 'F' : m.roundName) : 'KO'}
+                          size="small"
+                          sx={{ fontSize: 8, fontWeight: 700, bgcolor: 'rgba(255,152,0,0.1)', color: '#ff9800', minWidth: 28, height: 20 }}
+                        />
+                      )}
+                      {m.fixtureType === 'group_league' && (
+                        <Chip label="GRP" size="small"
+                          sx={{ fontSize: 8, fontWeight: 700, bgcolor: 'rgba(0,230,118,0.1)', color: '#00e676', minWidth: 28, height: 20 }} />
+                      )}
+                      {m.fixtureType === 'knockout' && m.leg && m.roundName !== 'Final' && (
+                        <Chip label={`L${m.leg}`} size="small"
+                          sx={{ fontSize: 8, fontWeight: 600, bgcolor: 'rgba(101,31,255,0.1)', color: '#651fff', minWidth: 22, height: 20 }} />
+                      )}
                     </Box>
-                    <Box sx={{ flex: 1, minWidth: 0 }}>
-                      <Typography variant="body2" sx={{ fontWeight: 700, fontSize: 12, color: m.result === 'team2' ? '#651fff' : 'text.primary' }} noWrap>
-                        {team2}
-                      </Typography>
-                    </Box>
-                    <Chip label={m.tournamentName} size="small"
-                      sx={{ fontSize: 9, fontWeight: 600, bgcolor: 'rgba(255,255,255,0.05)', display: isMobile ? 'none' : 'flex' }} />
-                    {m.fixtureType === 'knockout' && (
-                      <Chip
-                        label={m.roundName ? (m.roundName === 'Quarter-Final' ? 'QF' : m.roundName === 'Semi-Final' ? 'SF' : m.roundName === 'Final' ? 'F' : m.roundName) : 'KO'}
-                        size="small"
-                        sx={{ fontSize: 8, fontWeight: 700, bgcolor: 'rgba(255,152,0,0.1)', color: '#ff9800', minWidth: 28, display: isMobile ? 'none' : 'flex' }}
-                      />
-                    )}
-                    {m.fixtureType === 'group_league' && (
-                      <Chip label="GRP" size="small"
-                        sx={{ fontSize: 8, fontWeight: 700, bgcolor: 'rgba(0,230,118,0.1)', color: '#00e676', minWidth: 28, display: isMobile ? 'none' : 'flex' }} />
-                    )}
-                    {m.fixtureType === 'knockout' && m.leg && m.roundName !== 'Final' && (
-                      <Chip label={`L${m.leg}`} size="small"
-                        sx={{ fontSize: 8, fontWeight: 600, bgcolor: 'rgba(101,31,255,0.1)', color: '#651fff', minWidth: 22, display: isMobile ? 'none' : 'flex' }} />
-                    )}
                   </Box>
                 ))}
               </Stack>
