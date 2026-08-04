@@ -1563,6 +1563,160 @@ app.get('/api/team-rivals/:teamName1/:teamName2', requireAuth, async (req, res) 
   } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
 });
 
+// ─── Season Summary (auto-generated wrap for a specific tournament) ───────────
+app.get('/api/tournaments/:tId/season-summary', requireAuth, async (req, res) => {
+  try {
+    const tRes = await db.execute({ sql: 'SELECT * FROM tournaments WHERE id=? AND code=?', args: [req.params.tId, req.user.code] });
+    if (tRes.rows.length === 0) return res.status(404).json({ error: 'Tournament not found' });
+    const tournament = tRes.rows[0];
+
+    const teamsRes = await db.execute({ sql: 'SELECT * FROM teams WHERE tournament_id=?', args: [req.params.tId] });
+    const teams = teamsRes.rows;
+    const teamById = Object.fromEntries(teams.map(t => [t.id, t]));
+
+    const fixturesRes = await db.execute({ sql: 'SELECT * FROM fixtures WHERE tournament_id=? AND played=1', args: [req.params.tId] });
+    const fixtures = fixturesRes.rows;
+
+    if (fixtures.length === 0) {
+      return res.json({
+        tournament: { id: tournament.id, name: tournament.name, season: tournament.season, type: tournament.type },
+        summary: null,
+        message: 'No matches played yet'
+      });
+    }
+
+    // Champion & Runner-up
+    let champion = null, runnerUp = null;
+    if (tournament.type === 'league') {
+      const table = await computeTable(req.params.tId);
+      const unplayedRes = await db.execute({ sql: 'SELECT COUNT(*) as c FROM fixtures WHERE tournament_id=? AND fixture_type=? AND played=0', args: [req.params.tId, 'league'] });
+      if (table.length > 0 && table[0].mp > 0 && unplayedRes.rows[0].c === 0) {
+        champion = table[0].name;
+        runnerUp = table[1]?.name || null;
+      } else if (table.length > 0 && table[0].mp > 0) {
+        champion = table[0].name + ' (leading)';
+        runnerUp = table[1]?.name || null;
+      }
+    } else if (tournament.type === 'knockout') {
+      const roundsRes = await db.execute({ sql: 'SELECT MAX(round) as r FROM fixtures WHERE tournament_id=? AND fixture_type=?', args: [req.params.tId, 'knockout'] });
+      const maxRound = roundsRes.rows[0]?.r;
+      if (maxRound) {
+        const finalFix = await db.execute({ sql: 'SELECT * FROM fixtures WHERE tournament_id=? AND fixture_type=? AND round=? ORDER BY leg', args: [req.params.tId, 'knockout', maxRound] });
+        const leg1 = finalFix.rows.find(f => f.leg === 1);
+        const leg2 = finalFix.rows.find(f => f.leg === 2);
+        const winnerId = knockoutWinner(leg1, leg2);
+        if (winnerId) {
+          champion = teamById[winnerId]?.name || null;
+          const loserId = winnerId === leg1?.home_team_id ? leg1?.away_team_id : leg1?.home_team_id;
+          runnerUp = loserId ? (teamById[loserId]?.name || null) : null;
+        }
+      }
+    } else if (tournament.type === 'group_knockout') {
+      const knockoutRoundsRes = await db.execute({ sql: 'SELECT * FROM knockout_rounds WHERE tournament_id=?', args: [req.params.tId] });
+      const finalRound = knockoutRoundsRes.rows.find(r => r.round_name === 'Final');
+      if (finalRound) {
+        const finalFix = await db.execute({ sql: 'SELECT * FROM fixtures WHERE tournament_id=? AND fixture_type=? AND round=? AND match_number=1 AND leg=1', args: [req.params.tId, 'knockout', finalRound.round] });
+        if (finalFix.rows.length > 0 && finalFix.rows[0].played) {
+          const f = finalFix.rows[0];
+          const winnerId = f.home_score > f.away_score ? f.home_team_id : (f.away_score > f.home_score ? f.away_team_id : null);
+          const loserId = winnerId === f.home_team_id ? f.away_team_id : f.home_team_id;
+          champion = winnerId ? (teamById[winnerId]?.name || null) : null;
+          runnerUp = loserId ? (teamById[loserId]?.name || null) : null;
+        }
+      }
+    }
+
+    // Best Attack (most goals scored) & Best Defense (lowest goals conceded per match)
+    const teamGoals = {};
+    const teamConceded = {};
+    const teamMatches = {};
+    for (const f of fixtures) {
+      const homeName = teamById[f.home_team_id]?.name;
+      const awayName = teamById[f.away_team_id]?.name;
+      if (homeName) {
+        teamGoals[homeName] = (teamGoals[homeName] || 0) + (f.home_score || 0);
+        teamConceded[homeName] = (teamConceded[homeName] || 0) + (f.away_score || 0);
+        teamMatches[homeName] = (teamMatches[homeName] || 0) + 1;
+      }
+      if (awayName) {
+        teamGoals[awayName] = (teamGoals[awayName] || 0) + (f.away_score || 0);
+        teamConceded[awayName] = (teamConceded[awayName] || 0) + (f.home_score || 0);
+        teamMatches[awayName] = (teamMatches[awayName] || 0) + 1;
+      }
+    }
+
+    const bestAttack = Object.entries(teamGoals)
+      .sort((a, b) => b[1] - a[1])[0];
+    // Best defense = lowest conceded-per-match ratio (more matches = better if ratio is same)
+    const bestDefense = Object.entries(teamConceded)
+      .map(([name, conceded]) => {
+        const matches = teamMatches[name] || 1;
+        return { name, conceded, matches, ratio: +(conceded / matches).toFixed(2) };
+      })
+      .sort((a, b) => a.ratio - b.ratio || b.matches - a.matches)[0];
+
+    // Most Entertaining Match (highest goals + closest margin)
+    let bestMatch = null;
+    let bestScore = -1;
+    for (const f of fixtures) {
+      const totalGoals = (f.home_score || 0) + (f.away_score || 0);
+      const margin = Math.abs((f.home_score || 0) - (f.away_score || 0));
+      const score = totalGoals * 10 - margin;
+      if (score > bestScore && totalGoals > 0) {
+        bestScore = score;
+        bestMatch = {
+          homeTeam: teamById[f.home_team_id]?.name || 'Unknown',
+          awayTeam: teamById[f.away_team_id]?.name || 'Unknown',
+          homeScore: f.home_score,
+          awayScore: f.away_score,
+          totalGoals,
+          margin
+        };
+      }
+    }
+
+    // Biggest Win
+    let biggestWin = null;
+    let biggestMargin = 0;
+    for (const f of fixtures) {
+      const margin = Math.abs((f.home_score || 0) - (f.away_score || 0));
+      if (margin > biggestMargin) {
+        biggestMargin = margin;
+        const winnerId = f.home_score > f.away_score ? f.home_team_id : f.away_team_id;
+        biggestWin = {
+          winner: teamById[winnerId]?.name || 'Unknown',
+          homeTeam: teamById[f.home_team_id]?.name || 'Unknown',
+          awayTeam: teamById[f.away_team_id]?.name || 'Unknown',
+          homeScore: f.home_score,
+          awayScore: f.away_score,
+          margin
+        };
+      }
+    }
+
+    // Total stats
+    const totalGoals = fixtures.reduce((sum, f) => sum + (f.home_score || 0) + (f.away_score || 0), 0);
+    const totalMatches = fixtures.length;
+    const avgGoalsPerMatch = totalMatches > 0 ? +(totalGoals / totalMatches).toFixed(2) : 0;
+
+    res.json({
+      tournament: { id: tournament.id, name: tournament.name, season: tournament.season, type: tournament.type, archived: tournament.archived === 1 },
+      summary: {
+        champion,
+        runnerUp,
+        bestAttack: bestAttack ? { team: bestAttack[0], goals: bestAttack[1] } : null,
+        bestDefense: bestDefense ? { team: bestDefense.name, conceded: bestDefense.conceded, matches: bestDefense.matches, ratio: bestDefense.ratio } : null,
+        mostEntertainingMatch: bestMatch,
+        biggestWin,
+        totalGoals,
+        totalMatches,
+        avgGoalsPerMatch,
+        teamsCount: teams.length,
+      }
+    });
+  } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
+});
+
 // ─── Start ────────────────────────────────────────────────────────────────────
 async function startServer() {
   initDb();

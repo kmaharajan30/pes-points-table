@@ -88,3 +88,6 @@ export const getTeamProfile     = (teamName)  => axios.get(`${BASE}/team-profile
 // Player Profiles & Rival Tracker
 export const getPlayers       = ()                  => axios.get(`${BASE}/players`);
 export const getTeamRivals    = (teamName1, teamName2) => axios.get(`${BASE}/team-rivals/${encodeURIComponent(teamName1)}/${encodeURIComponent(teamName2)}`);
+
+// Season Summary
+export const getSeasonSummary    = (tId)   => axios.get(`${BASE}/tournaments/${tId}/season-summary`);

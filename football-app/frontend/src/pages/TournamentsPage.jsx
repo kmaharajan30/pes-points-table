@@ -3,12 +3,18 @@ import {
   Box, Button, Card, CardContent, CardActionArea,
   Dialog, DialogTitle, DialogContent, DialogActions,
   TextField, Typography, IconButton, Tooltip, ToggleButton, ToggleButtonGroup,
-  useMediaQuery, Checkbox, FormControlLabel, Chip
+  useMediaQuery, Checkbox, FormControlLabel, Chip, Skeleton
 } from '@mui/material';
 import { useTheme, keyframes } from '@mui/material/styles';
 import AddRoundedIcon from '@mui/icons-material/AddRounded';
 import EmojiEventsRoundedIcon from '@mui/icons-material/EmojiEventsRounded';
 import DeleteOutlineRoundedIcon from '@mui/icons-material/DeleteOutlineRounded';
+import AutoAwesomeRoundedIcon from '@mui/icons-material/AutoAwesomeRounded';
+import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
+import ShieldRoundedIcon from '@mui/icons-material/ShieldRounded';
+import WhatshotRoundedIcon from '@mui/icons-material/WhatshotRounded';
+import MilitaryTechRoundedIcon from '@mui/icons-material/MilitaryTechRounded';
+import LeaderboardRoundedIcon from '@mui/icons-material/LeaderboardRounded';
 import ArrowForwardRoundedIcon from '@mui/icons-material/ArrowForwardRounded';
 import SportsSoccerRoundedIcon from '@mui/icons-material/SportsSoccerRounded';
 import AccountTreeRoundedIcon from '@mui/icons-material/AccountTreeRounded';
@@ -19,7 +25,7 @@ import PageHeader from '../components/PageHeader';
 import EmptyState from '../components/EmptyState';
 import ConfirmDialog from '../components/ConfirmDialog';
 import LoadingState from '../components/LoadingState';
-import { getTournaments, createTournament, deleteTournament, getGlobalTeams } from '../api/footballApi';
+import { getTournaments, createTournament, deleteTournament, getGlobalTeams, getSeasonSummary } from '../api/footballApi';
 
 const goldShimmer = keyframes`
   0% { background-position: -200% center; }
@@ -45,6 +51,9 @@ export default function TournamentsPage({ onSelect, isAdmin }) {
   const [open, setOpen]               = useState(false);
   const [form, setForm]               = useState({ name:'', season:'', type:'league', num_groups: 2, legs: 2 });
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [summaryData, setSummaryData] = useState(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryOpen, setSummaryOpen] = useState(false);
   const [globalTeams, setGlobalTeams] = useState([]);
   const [selectedTeamIds, setSelectedTeamIds] = useState([]);
 
@@ -90,6 +99,17 @@ export default function TournamentsPage({ onSelect, isAdmin }) {
     await deleteTournament(deleteTarget.id);
     setDeleteTarget(null);
     load();
+  };
+
+  const handleOpenSummary = async (t) => {
+    setSummaryOpen(true);
+    setSummaryLoading(true);
+    setSummaryData(null);
+    try {
+      const res = await getSeasonSummary(t.id);
+      setSummaryData(res.data);
+    } catch (e) { console.error(e); }
+    setSummaryLoading(false);
   };
 
   return (
@@ -195,6 +215,13 @@ export default function TournamentsPage({ onSelect, isAdmin }) {
 
                       {/* Right: Actions */}
                       <Box sx={{ display:'flex', alignItems:'center', gap:0.5, flexShrink:0 }}>
+                        <Tooltip title="Tournament Summary">
+                          <IconButton size="small" onClick={e=>{ e.stopPropagation(); handleOpenSummary(t); }}
+                            sx={{ color:'rgba(255,255,255,0.4)', p:0.5,
+                              '&:hover':{ bgcolor:'rgba(0,230,118,0.1)', color:'#00e676' } }}>
+                            <AutoAwesomeRoundedIcon sx={{ fontSize:{ xs:17, sm:19 } }} />
+                          </IconButton>
+                        </Tooltip>
                         {isAdmin && (
                           <IconButton size="small" onClick={e=>{ e.stopPropagation(); setDeleteTarget(t); }}
                             sx={{ color:'rgba(255,82,82,0.6)', p:0.5, '&:hover':{ bgcolor:'rgba(255,82,82,0.1)', color:'#ff5252' } }}>
@@ -380,6 +407,154 @@ export default function TournamentsPage({ onSelect, isAdmin }) {
       <ConfirmDialog open={!!deleteTarget} title="Delete Tournament"
         message={`Delete "${deleteTarget?.name}"? All teams, fixtures and results will be removed.`}
         onConfirm={handleDelete} onCancel={()=>setDeleteTarget(null)} />
+
+      {/* Summary Dialog */}
+      <Dialog open={summaryOpen} onClose={()=>setSummaryOpen(false)} maxWidth="sm" fullWidth fullScreen={isMobile}
+        PaperProps={{ sx:{ borderRadius:{ xs:0, sm:3 }, bgcolor:'#0d1220' } }}>
+        <DialogTitle sx={{ display:'flex', alignItems:'center', justifyContent:'space-between', pb:1 }}>
+          <Box sx={{ display:'flex', alignItems:'center', gap:1 }}>
+            <MilitaryTechRoundedIcon sx={{ color:'#ffd700', fontSize:22 }} />
+            <Typography sx={{ fontWeight:800, fontSize:{ xs:14, sm:16 } }}>
+              {summaryData?.tournament?.name || 'Tournament Summary'}
+              {summaryData?.tournament?.season ? ` · ${summaryData.tournament.season}` : ''}
+            </Typography>
+          </Box>
+          <IconButton size="small" onClick={()=>setSummaryOpen(false)} sx={{ color:'text.secondary' }}>
+            <CloseRoundedIcon sx={{ fontSize:20 }} />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent sx={{ pb:3 }}>
+          {summaryLoading ? (
+            <Box sx={{ display:'flex', flexDirection:'column', gap:2, py:2 }}>
+              <Skeleton variant="rounded" height={100} sx={{ bgcolor:'rgba(255,255,255,0.05)', borderRadius:2 }} />
+              <Skeleton variant="rounded" height={60} sx={{ bgcolor:'rgba(255,255,255,0.05)', borderRadius:2 }} />
+              <Skeleton variant="rounded" height={60} sx={{ bgcolor:'rgba(255,255,255,0.05)', borderRadius:2 }} />
+            </Box>
+          ) : summaryData?.summary ? (
+            <SummaryContent summary={summaryData.summary} />
+          ) : (
+            <Box sx={{ textAlign:'center', py:4 }}>
+              <Typography sx={{ fontSize:36, mb:1 }}>📊</Typography>
+              <Typography color="text.secondary" sx={{ fontSize:13 }}>No matches played yet</Typography>
+            </Box>
+          )}
+        </DialogContent>
+      </Dialog>
+    </Box>
+  );
+}
+
+// ── Summary Content Component ─────────────────────────────────────────────────
+function SummaryContent({ summary }) {
+  return (
+    <Box sx={{ display:'flex', flexDirection:'column', gap:2.5 }}>
+      {/* Champion */}
+      {summary.champion && (
+        <Box sx={{
+          p:2.5, borderRadius:3, textAlign:'center',
+          background:'linear-gradient(135deg, rgba(255,215,0,0.08) 0%, rgba(255,160,0,0.04) 100%)',
+          border:'1px solid rgba(255,215,0,0.2)',
+        }}>
+          <Typography sx={{ fontSize:32, mb:0.5 }}>🏆</Typography>
+          <Typography sx={{ fontWeight:900, fontSize:18, color:'#ffd700', mb:0.25 }}>
+            {summary.champion}
+          </Typography>
+          <Typography sx={{ fontSize:11, color:'text.secondary', fontWeight:600 }}>Champion</Typography>
+          {summary.runnerUp && (
+            <Typography sx={{ fontSize:11, color:'text.secondary', mt:0.5 }}>
+              Runner-up: <strong style={{ color:'#c0c0c0' }}>{summary.runnerUp}</strong>
+            </Typography>
+          )}
+        </Box>
+      )}
+
+      {/* Stats Grid */}
+      <Box sx={{ display:'grid', gridTemplateColumns:{ xs:'1fr 1fr', sm:'1fr 1fr 1fr' }, gap:1.5 }}>
+        {summary.bestAttack && (
+          <SummaryStatCard icon={<SportsSoccerRoundedIcon sx={{ fontSize:18, color:'#00e676' }} />}
+            label="Best Attack" value={summary.bestAttack.team}
+            detail={`${summary.bestAttack.goals} goals`} color="#00e676" />
+        )}
+        {summary.bestDefense && (
+          <SummaryStatCard icon={<ShieldRoundedIcon sx={{ fontSize:18, color:'#40c4ff' }} />}
+            label="Best Defense" value={summary.bestDefense.team}
+            detail={`${summary.bestDefense.ratio} per match (${summary.bestDefense.conceded} in ${summary.bestDefense.matches})`} color="#40c4ff" />
+        )}
+        <SummaryStatCard icon={<SportsSoccerRoundedIcon sx={{ fontSize:18, color:'#ff6e40' }} />}
+          label="Total Goals" value={summary.totalGoals}
+          detail={`${summary.avgGoalsPerMatch} per match`} color="#ff6e40" />
+        <SummaryStatCard icon={<LeaderboardRoundedIcon sx={{ fontSize:18, color:'#a255ff' }} />}
+          label="Matches" value={summary.totalMatches}
+          detail={`${summary.teamsCount} teams`} color="#a255ff" />
+      </Box>
+
+      {/* Most Entertaining Match */}
+      {summary.mostEntertainingMatch && (
+        <Box sx={{
+          p:2, borderRadius:2.5,
+          background:'linear-gradient(135deg, rgba(255,82,82,0.06) 0%, rgba(101,31,255,0.06) 100%)',
+          border:'1px solid rgba(255,82,82,0.15)',
+        }}>
+          <Box sx={{ display:'flex', alignItems:'center', gap:0.75, mb:1.5 }}>
+            <WhatshotRoundedIcon sx={{ fontSize:16, color:'#ff5252' }} />
+            <Typography sx={{ fontWeight:700, fontSize:12, color:'#ff5252' }}>Most Entertaining Match</Typography>
+          </Box>
+          <Box sx={{ display:'flex', alignItems:'center', justifyContent:'center', gap:2 }}>
+            <Typography sx={{ fontWeight:700, fontSize:{ xs:12, sm:14 }, textAlign:'right', flex:1 }} noWrap>
+              {summary.mostEntertainingMatch.homeTeam}
+            </Typography>
+            <Box sx={{
+              px:1.5, py:0.5, borderRadius:1.5,
+              bgcolor:'rgba(0,230,118,0.1)', border:'1px solid rgba(0,230,118,0.2)',
+            }}>
+              <Typography sx={{ fontWeight:900, fontSize:16, color:'#00e676' }}>
+                {summary.mostEntertainingMatch.homeScore} - {summary.mostEntertainingMatch.awayScore}
+              </Typography>
+            </Box>
+            <Typography sx={{ fontWeight:700, fontSize:{ xs:12, sm:14 }, textAlign:'left', flex:1 }} noWrap>
+              {summary.mostEntertainingMatch.awayTeam}
+            </Typography>
+          </Box>
+          <Typography sx={{ textAlign:'center', fontSize:10, color:'text.secondary', mt:0.75 }}>
+            {summary.mostEntertainingMatch.totalGoals} goals
+          </Typography>
+        </Box>
+      )}
+
+      {/* Biggest Win */}
+      {summary.biggestWin && summary.biggestWin.margin > 0 && (
+        <Box sx={{
+          p:2, borderRadius:2.5,
+          background:'rgba(255,255,255,0.02)',
+          border:'1px solid rgba(255,255,255,0.07)',
+        }}>
+          <Box sx={{ display:'flex', alignItems:'center', gap:0.75, mb:1 }}>
+            <MilitaryTechRoundedIcon sx={{ fontSize:16, color:'#ffd740' }} />
+            <Typography sx={{ fontWeight:700, fontSize:12, color:'#ffd740' }}>Biggest Win</Typography>
+          </Box>
+          <Typography sx={{ fontSize:13, fontWeight:600, textAlign:'center' }}>
+            {summary.biggestWin.homeTeam} {summary.biggestWin.homeScore} - {summary.biggestWin.awayScore} {summary.biggestWin.awayTeam}
+          </Typography>
+          <Typography sx={{ textAlign:'center', fontSize:10, color:'text.secondary', mt:0.5 }}>
+            {summary.biggestWin.winner} won by {summary.biggestWin.margin} goal{summary.biggestWin.margin > 1 ? 's' : ''}
+          </Typography>
+        </Box>
+      )}
+    </Box>
+  );
+}
+
+function SummaryStatCard({ icon, label, value, detail, color }) {
+  return (
+    <Box sx={{
+      p:1.5, borderRadius:2,
+      background:`${color}0D`,
+      border:`1px solid ${color}22`,
+    }}>
+      {icon}
+      <Typography sx={{ fontSize:10, color:'text.secondary', fontWeight:600, mt:0.5 }}>{label}</Typography>
+      <Typography sx={{ fontWeight:800, fontSize:13, mt:0.25 }} noWrap>{value}</Typography>
+      <Typography sx={{ fontSize:10, color:'text.secondary' }}>{detail}</Typography>
     </Box>
   );
 }
