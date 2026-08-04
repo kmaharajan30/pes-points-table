@@ -80,3 +80,11 @@ export const seedKnockout             = (tId) => axios.post(`${BASE}/tournaments
 export const resetKnockoutSeeds       = (tId) => axios.post(`${BASE}/tournaments/${tId}/reset-knockout-seeds`);
 export const seedFinal                = (tId) => axios.post(`${BASE}/tournaments/${tId}/seed-final`);
 export const regenerateQuarterFinals  = (tId) => axios.post(`${BASE}/tournaments/${tId}/regenerate-quarter-finals`);
+
+// Team Profiles
+export const getTeamProfiles    = ()          => axios.get(`${BASE}/team-profiles`);
+export const getTeamProfile     = (teamName)  => axios.get(`${BASE}/team-profiles/${encodeURIComponent(teamName)}`);
+
+// Player Profiles & Rival Tracker
+export const getPlayers       = ()                  => axios.get(`${BASE}/players`);
+export const getTeamRivals    = (teamName1, teamName2) => axios.get(`${BASE}/team-rivals/${encodeURIComponent(teamName1)}/${encodeURIComponent(teamName2)}`);

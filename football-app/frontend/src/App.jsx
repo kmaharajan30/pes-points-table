@@ -14,6 +14,7 @@ import LeaderboardRoundedIcon from '@mui/icons-material/LeaderboardRounded';
 import ArrowBackIosNewRoundedIcon from '@mui/icons-material/ArrowBackIosNewRounded';
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded';
 import StarRoundedIcon from '@mui/icons-material/StarRounded';
+import CompareArrowsRoundedIcon from '@mui/icons-material/CompareArrowsRounded';
 import theme from './theme/theme';
 import LoginPage from './pages/LoginPage';
 import AdminLoginPage from './pages/AdminLoginPage';
@@ -23,6 +24,7 @@ import PointsTablePage from './pages/PointsTablePage';
 import GroupKnockoutPage from './pages/GroupKnockoutPage';
 import TopStatsPage from './pages/TopStatsPage';
 import GlobalTeamsPage from './pages/GlobalTeamsPage';
+import RivalTrackerPage from './pages/RivalTrackerPage';
 import ActiveUsers from './components/ActiveUsers';
 
 const DRAWER_WIDTH = 248;
@@ -121,6 +123,19 @@ export default function App() {
             <ListItemText primary="Top Performances" primaryTypographyProps={{ fontSize:13 }} />
           </ListItemButton>
         </ListItem>
+        <ListItem disablePadding>
+          <ListItemButton selected={!activeTournament && globalTab === 'rivals'}
+            onClick={()=>{ setActiveTournament(null); setGlobalTab('rivals'); setDrawerOpen(false); }}
+            sx={{ borderRadius:1.5, mb:0.25, py:0.75,
+              '&.Mui-selected':{ background:'linear-gradient(90deg,rgba(255,82,82,0.15),rgba(255,152,0,0.08))',
+                borderLeft:'3px solid #ff5252',
+                '& .MuiListItemIcon-root':{ color:'#ff5252' },
+                '& .MuiListItemText-primary':{ color:'#ff5252', fontWeight:700 } },
+              '&:hover':{ background:'rgba(255,255,255,0.04)' } }}>
+            <ListItemIcon sx={{ minWidth:32 }}><CompareArrowsRoundedIcon sx={{ fontSize:18 }} /></ListItemIcon>
+            <ListItemText primary="Rival Tracker" primaryTypographyProps={{ fontSize:13 }} />
+          </ListItemButton>
+        </ListItem>
       </List>
 
       {activeTournament && (
@@ -189,6 +204,7 @@ export default function App() {
     if (!activeTournament) {
       if (globalTab === 'stats') return <TopStatsPage />;
       if (globalTab === 'teams') return <GlobalTeamsPage isAdmin={isAdmin} />;
+      if (globalTab === 'rivals') return <RivalTrackerPage />;
       return <TournamentsPage onSelect={handleSelect} isAdmin={isAdmin} />;
     }
     if (activeTournament.type === 'group_knockout') {

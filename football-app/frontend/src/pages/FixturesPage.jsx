@@ -20,7 +20,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import LoadingState from '../components/LoadingState';
 import {
   getFixtures, createFixture, addResult, deleteFixture,
-  getTeams, generateFixtures, knockoutAdvance, getKnockoutBracket
+  getTeams, generateFixtures, knockoutAdvance, getKnockoutBracket, getPlayers
 } from '../api/footballApi';
 
 // ─── Shared utils ─────────────────────────────────────────────────────────────
@@ -52,20 +52,26 @@ function ScorePill({ home, away, played, compact=false }) {
 }
 
 // ─── Result Dialog (shared) ───────────────────────────────────────────────────
-function ResultDialog({ open, fixture, onSave, onClose }) {
+function ResultDialog({ open, fixture, onSave, onClose, players = [] }) {
   const theme   = useTheme();
   const isMobile= useMediaQuery(theme.breakpoints.down('sm'));
   const [score, setScore] = useState({ home:'', away:'' });
+  const [homeUserId, setHomeUserId] = useState('');
+  const [awayUserId, setAwayUserId] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (fixture) setScore({ home: fixture.played ? String(fixture.homeScore) : '', away: fixture.played ? String(fixture.awayScore) : '' });
+    if (fixture) {
+      setScore({ home: fixture.played ? String(fixture.homeScore) : '', away: fixture.played ? String(fixture.awayScore) : '' });
+      setHomeUserId('');
+      setAwayUserId('');
+    }
   }, [fixture]);
 
   const handleSave = async () => {
     if (score.home===''||score.away==='') return;
     setSaving(true);
-    await onSave(fixture.id, { homeScore:Number(score.home), awayScore:Number(score.away) });
+    await onSave(fixture.id, { homeScore:Number(score.home), awayScore:Number(score.away), homeUserId: homeUserId || undefined, awayUserId: awayUserId || undefined });
     setSaving(false); onClose();
   };
 
@@ -102,6 +108,33 @@ function ResultDialog({ open, fixture, onSave, onClose }) {
           <TextField label="Away" type="number" fullWidth size="small" inputProps={{ min:0 }}
             value={score.away} onChange={e=>setScore({...score,away:e.target.value})} />
         </Box>
+        {players.length > 0 && (
+          <Box sx={{ mt: 2 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, mb: 1, display: 'block', fontSize: 10 }}>
+              Assign Players (optional)
+            </Typography>
+            <Box sx={{ display: 'flex', gap: 1.5 }}>
+              <FormControl fullWidth size="small">
+                <InputLabel>Home Player</InputLabel>
+                <Select value={homeUserId} label="Home Player" onChange={e => setHomeUserId(e.target.value)}>
+                  <MenuItem value=""><em>None</em></MenuItem>
+                  {players.filter(p => p.id !== awayUserId).map(p => (
+                    <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl fullWidth size="small">
+                <InputLabel>Away Player</InputLabel>
+                <Select value={awayUserId} label="Away Player" onChange={e => setAwayUserId(e.target.value)}>
+                  <MenuItem value=""><em>None</em></MenuItem>
+                  {players.filter(p => p.id !== homeUserId).map(p => (
+                    <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Box>
+          </Box>
+        )}
       </DialogContent>
       <DialogActions sx={{ px:2.5, pb:2.5, gap:1 }}>
         <Button onClick={onClose} variant="outlined" color="inherit" size="small"
@@ -498,6 +531,7 @@ export default function FixturesPage({ tournament, isAdmin }) {
   const [fixtures,    setFixtures]   = useState([]);
   const [bracket,     setBracket]    = useState([]);
   const [teams,       setTeams]      = useState([]);
+  const [players,     setPlayers]    = useState([]);
   const [loading,     setLoading]    = useState(true);
   const [generating,  setGenerating] = useState(false);
   const [advancing,   setAdvancing]  = useState(false);
@@ -509,9 +543,10 @@ export default function FixturesPage({ tournament, isAdmin }) {
 
   const load = async () => {
     try {
-      const [fxRes, tmRes] = await Promise.all([getFixtures(tournament.id), getTeams(tournament.id)]);
+      const [fxRes, tmRes, plRes] = await Promise.all([getFixtures(tournament.id), getTeams(tournament.id), getPlayers()]);
       setFixtures(fxRes.data);
       setTeams(tmRes.data);
+      setPlayers(plRes.data);
       if (isKnockout) {
         const brRes = await getKnockoutBracket(tournament.id);
         setBracket(brRes.data);
@@ -611,6 +646,7 @@ export default function FixturesPage({ tournament, isAdmin }) {
       <ResultDialog
         open={!!resultFix} fixture={resultFix}
         onSave={handleResult} onClose={()=>setResultFix(null)}
+        players={players}
       />
 
       {/* Delete confirmation */}
