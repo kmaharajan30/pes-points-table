@@ -494,7 +494,22 @@ app.post('/api/tournaments/:tId/generate-fixtures', requireAuth, requireAdmin, a
     const t = tRes.rows[0];
 
     const teamsRes = await db.execute({ sql: 'SELECT * FROM teams WHERE tournament_id=?', args: [req.params.tId] });
-    const teams = teamsRes.rows;
+    let teams = teamsRes.rows;
+
+    // If no tournament teams yet, auto-copy from global teams
+    if (teams.length === 0) {
+      const globalTeams = await db.execute({ sql: 'SELECT * FROM global_teams WHERE code=?', args: [req.user.code] });
+      if (globalTeams.rows.length >= 2) {
+        const stmts = globalTeams.rows.map(gt => ({
+          sql: 'INSERT INTO teams (id,tournament_id,name) VALUES (?,?,?)',
+          args: [uuidv4(), req.params.tId, gt.name]
+        }));
+        await db.batch(stmts, 'write');
+        const refreshed = await db.execute({ sql: 'SELECT * FROM teams WHERE tournament_id=?', args: [req.params.tId] });
+        teams = refreshed.rows;
+      }
+    }
+
     if (teams.length < 2) return res.status(400).json({ error: 'Need at least 2 teams' });
 
     let overrideLegs = null;

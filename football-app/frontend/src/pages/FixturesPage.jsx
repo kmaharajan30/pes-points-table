@@ -226,7 +226,7 @@ function LeagueFixtures({ tournament, teams, fixtures, onResult, onDelete, onReg
         <Box sx={{ display:'flex', gap:1, mb:2, flexWrap:'wrap' }}>
           <Button variant="contained" size="small"
             startIcon={<AutoFixHighRoundedIcon sx={{ fontSize:'16px !important' }} />}
-            onClick={()=>onRegenerate(true)} disabled={generating||teams.length<2}
+            onClick={()=>onRegenerate(true)} disabled={generating}
             sx={{ background:'linear-gradient(135deg,#651fff,#3500cb)', color:'#fff', fontSize:{ xs:11, sm:13 } }}>
             {generating?'Generating…':'Auto-Generate'}
           </Button>
@@ -625,7 +625,7 @@ export default function FixturesPage({ tournament, isAdmin }) {
 
       {!loading && teams.length < 2 && (
         <Alert severity="warning" sx={{ mb:3, borderRadius:2 }}>
-          Add at least 2 teams before creating fixtures
+          No teams in this tournament yet — click <strong>Auto-Generate</strong> to import your global teams and create fixtures automatically.
         </Alert>
       )}
 
