@@ -222,20 +222,22 @@ function LeagueFixtures({ tournament, teams, fixtures, onResult, onDelete, onReg
 
   return (
     <Box>
-      <Box sx={{ display:'flex', gap:1, mb:2, flexWrap:'wrap' }}>
-        <Button variant="contained" size="small"
-          startIcon={<AutoFixHighRoundedIcon sx={{ fontSize:'16px !important' }} />}
-          onClick={()=>onRegenerate(true)} disabled={generating||teams.length<2}
-          sx={{ background:'linear-gradient(135deg,#651fff,#3500cb)', color:'#fff', fontSize:{ xs:11, sm:13 } }}>
-          {generating?'Generating…':'Auto-Generate'}
-        </Button>
-        <Button variant="outlined" size="small"
-          startIcon={<AddRoundedIcon sx={{ fontSize:'16px !important' }} />}
-          onClick={()=>setAddOpen(true)} disabled={teams.length<2}
-          sx={{ borderColor:'rgba(255,255,255,0.15)', fontSize:{ xs:11, sm:13 } }}>
-          Add Fixture
-        </Button>
-      </Box>
+      {isAdmin && (
+        <Box sx={{ display:'flex', gap:1, mb:2, flexWrap:'wrap' }}>
+          <Button variant="contained" size="small"
+            startIcon={<AutoFixHighRoundedIcon sx={{ fontSize:'16px !important' }} />}
+            onClick={()=>onRegenerate(true)} disabled={generating||teams.length<2}
+            sx={{ background:'linear-gradient(135deg,#651fff,#3500cb)', color:'#fff', fontSize:{ xs:11, sm:13 } }}>
+            {generating?'Generating…':'Auto-Generate'}
+          </Button>
+          <Button variant="outlined" size="small"
+            startIcon={<AddRoundedIcon sx={{ fontSize:'16px !important' }} />}
+            onClick={()=>setAddOpen(true)} disabled={teams.length<2}
+            sx={{ borderColor:'rgba(255,255,255,0.15)', fontSize:{ xs:11, sm:13 } }}>
+            Add Fixture
+          </Button>
+        </Box>
+      )}
 
       {fixtures.length===0 ? (
         <EmptyState icon={<SportsSoccerRoundedIcon sx={{ fontSize:48 }}/>} title="No fixtures yet"
@@ -309,14 +311,16 @@ function KnockoutBracket({ tournament, teams, bracket, onResult, onDelete, onAdv
   if (!bracket || bracket.length===0) {
     return (
       <Box>
-        <Button variant="contained" size="small"
-          startIcon={<AutoFixHighRoundedIcon sx={{ fontSize:'16px !important' }} />}
-          onClick={()=>onRegenerate(true)} disabled={generating||teams.length<2}
-          sx={{ background:'linear-gradient(135deg,#651fff,#3500cb)', color:'#fff', mb:2, fontSize:{ xs:11, sm:13 } }}>
-          {generating?'Drawing…':'Draw Knockout Bracket'}
-        </Button>
+        {isAdmin && (
+          <Button variant="contained" size="small"
+            startIcon={<AutoFixHighRoundedIcon sx={{ fontSize:'16px !important' }} />}
+            onClick={()=>onRegenerate(true)} disabled={generating||teams.length<2}
+            sx={{ background:'linear-gradient(135deg,#651fff,#3500cb)', color:'#fff', mb:2, fontSize:{ xs:11, sm:13 } }}>
+            {generating?'Drawing…':'Draw Knockout Bracket'}
+          </Button>
+        )}
         <EmptyState icon={<AccountTreeRoundedIcon sx={{ fontSize:48 }}/>} title="No bracket yet"
-          subtitle="Tap 'Draw Knockout Bracket' to auto-generate the first round" />
+          subtitle={isAdmin ? "Tap 'Draw Knockout Bracket' to auto-generate the first round" : "Waiting for admin to draw the bracket"} />
       </Box>
     );
   }
@@ -358,12 +362,14 @@ function KnockoutBracket({ tournament, teams, bracket, onResult, onDelete, onAdv
             {advancing?'Advancing…':'Next Round →'}
           </Button>
         ) : null}
-        <Button variant="outlined" size="small"
-          startIcon={<AutoFixHighRoundedIcon sx={{ fontSize:'14px !important' }} />}
-          onClick={()=>onRegenerate(true)} disabled={generating}
-          sx={{ borderColor:'rgba(255,255,255,0.15)', ml:'auto', fontSize:{ xs:10, sm:12 } }}>
-          Re-draw
-        </Button>
+        {isAdmin && (
+          <Button variant="outlined" size="small"
+            startIcon={<AutoFixHighRoundedIcon sx={{ fontSize:'14px !important' }} />}
+            onClick={()=>onRegenerate(true)} disabled={generating}
+            sx={{ borderColor:'rgba(255,255,255,0.15)', ml:'auto', fontSize:{ xs:10, sm:12 } }}>
+            Re-draw
+          </Button>
+        )}
       </Box>
 
       {/* Bracket — horizontal scroll on mobile */}

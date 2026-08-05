@@ -540,21 +540,22 @@ export default function GroupKnockoutPage({ tournament, view = 'fixtures', isAdm
       )}
 
       {/* Action buttons */}
-      <Box sx={{ mb:2.5, display:'flex', gap:1, flexWrap:'wrap' }}>
-        <Button variant="contained" size="small"
-          startIcon={<AutoFixHighRoundedIcon sx={{ fontSize:'16px !important' }} />}
-          onClick={openGenerate} disabled={generating}
-          sx={{ background:'linear-gradient(135deg,#651fff,#3500cb)', color:'#fff', fontSize:{ xs:11, sm:13 } }}>
-          {generating ? 'Generating…' : groupFixtures.length > 0 ? 'Re-draw Groups' : 'Generate Fixtures'}
-        </Button>
-        {needsSeedKnockout && (
+      {isAdmin && (
+        <Box sx={{ mb:2.5, display:'flex', gap:1, flexWrap:'wrap' }}>
           <Button variant="contained" size="small"
-            startIcon={<AccountTreeRoundedIcon sx={{ fontSize:'16px !important' }} />}
-            onClick={handleSeedKnockout} disabled={seeding}
-            sx={{ background:'linear-gradient(135deg,#ff9800,#e65100)', color:'#000', fontWeight:800, fontSize:{ xs:11, sm:13 } }}>
-            {seeding ? 'Seeding…' : hasQF ? 'Seed Quarter-Finals →' : 'Seed Semi-Finals →'}
+            startIcon={<AutoFixHighRoundedIcon sx={{ fontSize:'16px !important' }} />}
+            onClick={openGenerate} disabled={generating}
+            sx={{ background:'linear-gradient(135deg,#651fff,#3500cb)', color:'#fff', fontSize:{ xs:11, sm:13 } }}>
+            {generating ? 'Generating…' : groupFixtures.length > 0 ? 'Re-draw Groups' : 'Generate Fixtures'}
           </Button>
-        )}
+          {needsSeedKnockout && (
+            <Button variant="contained" size="small"
+              startIcon={<AccountTreeRoundedIcon sx={{ fontSize:'16px !important' }} />}
+              onClick={handleSeedKnockout} disabled={seeding}
+              sx={{ background:'linear-gradient(135deg,#ff9800,#e65100)', color:'#000', fontWeight:800, fontSize:{ xs:11, sm:13 } }}>
+              {seeding ? 'Seeding…' : hasQF ? 'Seed Quarter-Finals →' : 'Seed Semi-Finals →'}
+            </Button>
+          )}
         {/* Show reset button when knockout has been seeded (so user can fix wrong seeds) */}
         {false && firstKnockoutSeeded && !champion && (
           <Button variant="outlined" size="small"
@@ -582,7 +583,8 @@ export default function GroupKnockoutPage({ tournament, view = 'fixtures', isAdm
             {regenQF ? 'Regenerating…' : 'Regenerate QF'}
           </Button>
         )}
-      </Box>
+        </Box>
+      )}
 
       {loading ? (
         <LoadingState variant="rows" count={4} />

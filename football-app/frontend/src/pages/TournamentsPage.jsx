@@ -115,7 +115,7 @@ export default function TournamentsPage({ onSelect, isAdmin }) {
   return (
     <Box>
       <PageHeader icon="🏆" title="Tournaments" subtitle="Your football tournaments"
-        action={
+        action={isAdmin && (
           <Button variant="contained" size="small"
             startIcon={<AddRoundedIcon sx={{ fontSize:'16px !important' }} />}
             onClick={()=>handleOpenCreate()}
@@ -123,7 +123,7 @@ export default function TournamentsPage({ onSelect, isAdmin }) {
               fontSize:{ xs:11, sm:13 }, px:{ xs:1.5, sm:2 }, py:{ xs:0.6, sm:0.75 }, minWidth:0 }}>
             <Box component="span" sx={{ display:{ xs:'none', sm:'inline' } }}>New&nbsp;</Box>Tournament
           </Button>
-        }
+        )}
       />
 
       {loading ? (

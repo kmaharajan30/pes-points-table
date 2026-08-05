@@ -245,19 +245,26 @@ app.post('/api/admin/create', async (req, res) => {
     if (!name || !code || !adminKey) return res.status(400).json({ error: 'Name, code, and admin key required' });
     if (code.trim().length < 4) return res.status(400).json({ error: 'Code must be ≥ 4 characters' });
     // Validate admin key against DB
-    const keyCheck = await db.execute({ sql: 'SELECT id FROM admin_keys WHERE key=?', args: [adminKey.trim()] });
+    const keyCheck = await db.execute({ sql: 'SELECT id, used_by FROM admin_keys WHERE key=?', args: [adminKey.trim()] });
     if (keyCheck.rows.length === 0) return res.status(403).json({ error: 'Invalid admin key' });
+    // Check if key is already used by another user
+    const keyRow = keyCheck.rows[0];
+    if (keyRow.used_by) return res.status(403).json({ error: 'This admin key has already been used by another user' });
     const [n, c] = [name.trim().toLowerCase(), code.trim()];
     // Check if user already exists
     const existing = await db.execute({ sql: 'SELECT * FROM users WHERE code=? AND LOWER(name)=LOWER(?)', args: [c, n] });
     if (existing.rows.length > 0) {
       // Upgrade to admin if not already
       await db.execute({ sql: 'UPDATE users SET is_admin=1 WHERE id=?', args: [existing.rows[0].id] });
+      // Mark the key as used by this user
+      await db.execute({ sql: 'UPDATE admin_keys SET used_by=? WHERE id=?', args: [existing.rows[0].id, keyRow.id] });
       const u = existing.rows[0];
       return res.json({ user: { id: u.id, name: u.name, code: u.code, isAdmin: true } });
     }
     const user = { id: uuidv4(), name: n, code: c, created_at: new Date().toISOString() };
     await db.execute({ sql: 'INSERT INTO users (id,name,code,created_at,is_admin) VALUES (?,?,?,?,1)', args: [user.id, user.name, user.code, user.created_at] });
+    // Mark the key as used by this new user
+    await db.execute({ sql: 'UPDATE admin_keys SET used_by=? WHERE id=?', args: [user.id, keyRow.id] });
     res.status(201).json({ user: { id: user.id, name: user.name, code: user.code, isAdmin: true } });
   } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
 });
@@ -356,7 +363,7 @@ app.get('/api/tournaments', requireAuth, async (req, res) => {
   } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
 });
 
-app.post('/api/tournaments', requireAuth, async (req, res) => {
+app.post('/api/tournaments', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { name, season, type='league', num_groups=2, legs=2, teamIds=[] } = req.body;
     if (!name) return res.status(400).json({ error: 'Name required' });
@@ -480,7 +487,7 @@ app.delete('/api/tournaments/:tId/teams/:teamId', requireAuth, requireAdmin, asy
 });
 
 // ─── Generate Fixtures ────────────────────────────────────────────────────────
-app.post('/api/tournaments/:tId/generate-fixtures', requireAuth, async (req, res) => {
+app.post('/api/tournaments/:tId/generate-fixtures', requireAuth, requireAdmin, async (req, res) => {
   try {
     const tRes = await db.execute({ sql: 'SELECT * FROM tournaments WHERE id=? AND code=?', args: [req.params.tId, req.user.code] });
     if (tRes.rows.length === 0) return res.status(404).json({ error: 'Tournament not found' });
@@ -1778,10 +1785,28 @@ async function startServer() {
   try {
     await db.execute(`ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0`);
   } catch(_) { /* column already exists */ }
-  // Seed the admin key if not present
-  const existingKey = await db.execute({ sql: "SELECT id FROM admin_keys WHERE key=?", args: ['Admin@3012'] });
-  if (existingKey.rows.length === 0) {
-    await db.execute({ sql: "INSERT INTO admin_keys (id, key, created_at) VALUES (?, ?, ?)", args: [uuidv4(), 'Admin@3012', new Date().toISOString()] });
+  // Add used_by column to admin_keys if not exists
+  try {
+    await db.execute(`ALTER TABLE admin_keys ADD COLUMN used_by TEXT DEFAULT NULL`);
+  } catch(_) { /* column already exists */ }
+  // Seed admin keys (10 unique keys, one per admin user)
+  const adminKeys = [
+    'Admin@3012',
+    'Admin@4523',
+    'Admin@5678',
+    'Admin@6789',
+    'Admin@7890',
+    'Admin@8901',
+    'Admin@9012',
+    'Admin@1234',
+    'Admin@2345',
+    'Admin@3456',
+  ];
+  for (const key of adminKeys) {
+    const existingKey = await db.execute({ sql: "SELECT id FROM admin_keys WHERE key=?", args: [key] });
+    if (existingKey.rows.length === 0) {
+      await db.execute({ sql: "INSERT INTO admin_keys (id, key, created_at) VALUES (?, ?, ?)", args: [uuidv4(), key, new Date().toISOString()] });
+    }
   }
 
   const PORT = process.env.PORT || 5000;
