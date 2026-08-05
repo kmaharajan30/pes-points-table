@@ -623,7 +623,7 @@ export default function FixturesPage({ tournament, isAdmin }) {
       {error   && <Alert severity="error"   sx={{ mb:2, borderRadius:2 }} onClose={()=>setError('')}>{error}</Alert>}
       {advanceMsg && <Alert severity="success" sx={{ mb:2, borderRadius:2 }} onClose={()=>setAdvanceMsg('')}>{advanceMsg}</Alert>}
 
-      {teams.length < 2 && (
+      {!loading && teams.length < 2 && (
         <Alert severity="warning" sx={{ mb:3, borderRadius:2 }}>
           Add at least 2 teams before creating fixtures
         </Alert>
