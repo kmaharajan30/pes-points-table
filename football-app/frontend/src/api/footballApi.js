@@ -91,3 +91,14 @@ export const getTeamRivals    = (teamName1, teamName2) => axios.get(`${BASE}/tea
 
 // Season Summary
 export const getSeasonSummary    = (tId)   => axios.get(`${BASE}/tournaments/${tId}/season-summary`);
+
+// Dashboard
+export const getDashboard = () => axios.get(`${BASE}/dashboard`);
+
+// ELO Ratings
+export const getEloRatings = () => axios.get(`${BASE}/elo-ratings`);
+
+// Birthday Wishes
+export const getBirthdayWishes  = ()     => axios.get(`${BASE}/birthday`);
+export const createBirthdayWish = (data) => axios.post(`${BASE}/birthday`, data);
+export const deleteBirthdayWish = (id)   => axios.delete(`${BASE}/birthday/${id}`);

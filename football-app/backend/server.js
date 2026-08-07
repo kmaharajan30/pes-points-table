@@ -710,7 +710,7 @@ app.put('/api/tournaments/:tId/fixtures/:fId/result', requireAuth, async (req, r
     if (homeScore===undefined||awayScore===undefined) return res.status(400).json({ error: 'Scores required' });
     const check = await db.execute({ sql: 'SELECT * FROM fixtures WHERE id=?', args: [req.params.fId] });
     if (check.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-    await db.execute({ sql: 'UPDATE fixtures SET home_score=?,away_score=?,played=1 WHERE id=?', args: [+homeScore,+awayScore,req.params.fId] });
+    await db.execute({ sql: 'UPDATE fixtures SET home_score=?,away_score=?,played=1,played_at=? WHERE id=?', args: [+homeScore,+awayScore,new Date().toISOString(),req.params.fId] });
 
     // Save user-team mappings if provided
     const fixture = check.rows[0];
@@ -1585,6 +1585,239 @@ app.get('/api/team-rivals/:teamName1/:teamName2', requireAuth, async (req, res) 
   } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
 });
 
+// ─── ELO Power Ratings ────────────────────────────────────────────────────────
+app.get('/api/elo-ratings', requireAuth, async (req, res) => {
+  try {
+    // Get all played fixtures across all tournaments for this user's group
+    const tourRes = await db.execute({ sql: 'SELECT id FROM tournaments WHERE code=?', args: [req.user.code] });
+    if (tourRes.rows.length === 0) return res.json({ ratings: [], history: [] });
+
+    const tournamentIds = tourRes.rows.map(t => t.id);
+    const placeholders = tournamentIds.map(() => '?').join(',');
+
+    // Get all played fixtures ordered by rowid (insertion order = chronological)
+    const fixRes = await db.execute({
+      sql: `SELECT f.*, t.name as tournament_name FROM fixtures f
+            JOIN tournaments t ON f.tournament_id = t.id
+            WHERE f.tournament_id IN (${placeholders}) AND f.played = 1
+            ORDER BY f.rowid`,
+      args: [...tournamentIds]
+    });
+
+    // Get all teams across tournaments (use global team names for consistency)
+    const teamsRes = await db.execute({
+      sql: `SELECT * FROM teams WHERE tournament_id IN (${placeholders})`,
+      args: [...tournamentIds]
+    });
+    const teamById = Object.fromEntries(teamsRes.rows.map(t => [t.id, t]));
+
+    // ELO calculation - group by team NAME (since same team can appear in multiple tournaments)
+    const K = 32;
+    const ratings = {}; // { teamName: currentElo }
+    const history = []; // { teamName, elo, change, opponent, matchInfo }
+
+    for (const f of fixRes.rows) {
+      const homeName = teamById[f.home_team_id]?.name;
+      const awayName = teamById[f.away_team_id]?.name;
+      if (!homeName || !awayName) continue;
+
+      if (!ratings[homeName]) ratings[homeName] = 1200;
+      if (!ratings[awayName]) ratings[awayName] = 1200;
+
+      const homeElo = ratings[homeName];
+      const awayElo = ratings[awayName];
+
+      // Expected scores
+      const expectedHome = 1 / (1 + Math.pow(10, (awayElo - homeElo) / 400));
+      const expectedAway = 1 / (1 + Math.pow(10, (homeElo - awayElo) / 400));
+
+      // Actual scores
+      let actualHome, actualAway;
+      if (f.home_score > f.away_score) { actualHome = 1; actualAway = 0; }
+      else if (f.home_score < f.away_score) { actualHome = 0; actualAway = 1; }
+      else { actualHome = 0.5; actualAway = 0.5; }
+
+      // Goal difference multiplier (more decisive wins = bigger change)
+      const goalDiff = Math.abs(f.home_score - f.away_score);
+      const multiplier = goalDiff <= 1 ? 1 : goalDiff === 2 ? 1.5 : (1.5 + (goalDiff - 2) * 0.25);
+
+      // Knockout bonus (knockout matches matter more)
+      const koBonus = f.fixture_type === 'knockout' ? 1.3 : 1;
+
+      const homeChange = Math.round(K * multiplier * koBonus * (actualHome - expectedHome));
+      const awayChange = Math.round(K * multiplier * koBonus * (actualAway - expectedAway));
+
+      ratings[homeName] += homeChange;
+      ratings[awayName] += awayChange;
+
+      history.push({
+        team: homeName, elo: ratings[homeName], change: homeChange,
+        opponent: awayName, score: `${f.home_score}-${f.away_score}`,
+        tournament: f.tournament_name, fixtureType: f.fixture_type
+      });
+      history.push({
+        team: awayName, elo: ratings[awayName], change: awayChange,
+        opponent: homeName, score: `${f.away_score}-${f.home_score}`,
+        tournament: f.tournament_name, fixtureType: f.fixture_type
+      });
+    }
+
+    // Sort ratings by ELO descending
+    const sortedRatings = Object.entries(ratings)
+      .map(([name, elo]) => {
+        const teamHistory = history.filter(h => h.team === name);
+        const lastChange = teamHistory.length > 0 ? teamHistory[teamHistory.length - 1].change : 0;
+        const matches = teamHistory.length;
+        const peak = teamHistory.reduce((max, h) => Math.max(max, h.elo), 1200);
+        return { name, elo, lastChange, matches, peak };
+      })
+      .sort((a, b) => b.elo - a.elo);
+
+    res.json({ ratings: sortedRatings, history });
+  } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
+});
+
+// ─── Birthday Wishes ──────────────────────────────────────────────────────────
+app.post('/api/birthday', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: 'Name required' });
+    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const wish = { id: uuidv4(), code: req.user.code, name: name.trim(), created_date: today, created_at: new Date().toISOString() };
+    await db.execute({ sql: 'INSERT INTO birthday_wishes (id, code, name, created_date, created_at) VALUES (?,?,?,?,?)', args: [wish.id, wish.code, wish.name, wish.created_date, wish.created_at] });
+    res.status(201).json({ id: wish.id, name: wish.name, createdDate: wish.created_date });
+  } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
+});
+
+app.get('/api/birthday', requireAuth, async (req, res) => {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    // Auto-delete old wishes (not from today)
+    await db.execute({ sql: 'DELETE FROM birthday_wishes WHERE code=? AND created_date != ?', args: [req.user.code, today] });
+    // Return today's wishes
+    const result = await db.execute({ sql: 'SELECT * FROM birthday_wishes WHERE code=? AND created_date=?', args: [req.user.code, today] });
+    res.json(result.rows.map(r => ({ id: r.id, name: r.name, createdDate: r.created_date })));
+  } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
+});
+
+app.delete('/api/birthday/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    await db.execute({ sql: 'DELETE FROM birthday_wishes WHERE id=? AND code=?', args: [req.params.id, req.user.code] });
+    res.json({ message: 'Deleted' });
+  } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
+});
+
+// ─── Dashboard / Season Overview ──────────────────────────────────────────────
+app.get('/api/dashboard', requireAuth, async (req, res) => {
+  try {
+    const tourRes = await db.execute({ sql: 'SELECT * FROM tournaments WHERE code=? ORDER BY created_at DESC', args: [req.user.code] });
+    if (tourRes.rows.length === 0) return res.json({ activeTournaments: [], recentResults: [], upcomingFixtures: [], leagueLeaders: [], streaks: [] });
+
+    const tournamentIds = tourRes.rows.map(t => t.id);
+    const placeholders = tournamentIds.map(() => '?').join(',');
+
+    // Recent results (last 5 played matches, ordered by when result was entered)
+    const recentRes = await db.execute({
+      sql: `SELECT f.*, t.name as tournament_name FROM fixtures f
+            JOIN tournaments t ON f.tournament_id = t.id
+            WHERE f.tournament_id IN (${placeholders}) AND f.played = 1
+            ORDER BY COALESCE(f.played_at, '') DESC, f.rowid DESC LIMIT 5`,
+      args: [...tournamentIds]
+    });
+
+    // Upcoming fixtures (next 5 unplayed with teams assigned)
+    const upcomingRes = await db.execute({
+      sql: `SELECT f.*, t.name as tournament_name FROM fixtures f
+            JOIN tournaments t ON f.tournament_id = t.id
+            WHERE f.tournament_id IN (${placeholders}) AND f.played = 0
+            AND f.home_team_id IS NOT NULL AND f.away_team_id IS NOT NULL
+            ORDER BY f.rowid LIMIT 5`,
+      args: [...tournamentIds]
+    });
+
+    // Get all teams for name lookup
+    const teamsRes = await db.execute({
+      sql: `SELECT * FROM teams WHERE tournament_id IN (${placeholders})`,
+      args: [...tournamentIds]
+    });
+    const teamById = Object.fromEntries(teamsRes.rows.map(t => [t.id, t]));
+
+    const mapFixture = (f) => ({
+      id: f.id, tournamentId: f.tournament_id, tournamentName: f.tournament_name,
+      homeTeam: teamById[f.home_team_id]?.name || 'TBD',
+      awayTeam: teamById[f.away_team_id]?.name || 'TBD',
+      homeScore: f.home_score, awayScore: f.away_score,
+      played: f.played === 1, fixtureType: f.fixture_type,
+      round: f.round, leg: f.leg
+    });
+
+    // League leaders (top of each active league tournament)
+    const leagueLeaders = [];
+    for (const t of tourRes.rows) {
+      if (t.type === 'league') {
+        const table = await computeTable(t.id);
+        if (table.length > 0 && table[0].mp > 0) {
+          const totalFixtures = await db.execute({ sql: 'SELECT COUNT(*) as c FROM fixtures WHERE tournament_id=? AND fixture_type=?', args: [t.id, 'league'] });
+          const playedFixtures = await db.execute({ sql: 'SELECT COUNT(*) as c FROM fixtures WHERE tournament_id=? AND fixture_type=? AND played=1', args: [t.id, 'league'] });
+          leagueLeaders.push({
+            tournament: t.name, leader: table[0].name, pts: table[0].pts,
+            matchday: playedFixtures.rows[0].c, totalMatchdays: totalFixtures.rows[0].c,
+            table: table.slice(0, 3)
+          });
+        }
+      }
+    }
+
+    // Win streaks (find teams on hot streaks)
+    const allPlayedRes = await db.execute({
+      sql: `SELECT f.* FROM fixtures f
+            WHERE f.tournament_id IN (${placeholders}) AND f.played = 1
+            ORDER BY f.rowid DESC`,
+      args: [...tournamentIds]
+    });
+
+    const teamStreaks = {};
+    for (const f of allPlayedRes.rows) {
+      const homeName = teamById[f.home_team_id]?.name;
+      const awayName = teamById[f.away_team_id]?.name;
+      if (!homeName || !awayName) continue;
+
+      // Track consecutive wins
+      if (!teamStreaks[homeName]) teamStreaks[homeName] = { wins: 0, counting: true };
+      if (!teamStreaks[awayName]) teamStreaks[awayName] = { wins: 0, counting: true };
+
+      if (teamStreaks[homeName].counting) {
+        if (f.home_score > f.away_score) teamStreaks[homeName].wins++;
+        else teamStreaks[homeName].counting = false;
+      }
+      if (teamStreaks[awayName].counting) {
+        if (f.away_score > f.home_score) teamStreaks[awayName].wins++;
+        else teamStreaks[awayName].counting = false;
+      }
+    }
+
+    const streaks = Object.entries(teamStreaks)
+      .filter(([_, s]) => s.wins >= 2)
+      .map(([name, s]) => ({ team: name, wins: s.wins }))
+      .sort((a, b) => b.wins - a.wins)
+      .slice(0, 5);
+
+    // Active tournaments with progress
+    const activeTournaments = tourRes.rows.slice(0, 5).map(t => {
+      const totalFix = allPlayedRes.rows.filter(f => f.tournament_id === t.id).length;
+      return { id: t.id, name: t.name, type: t.type, season: t.season, matchesPlayed: totalFix };
+    });
+
+    res.json({
+      activeTournaments,
+      recentResults: recentRes.rows.map(mapFixture),
+      upcomingFixtures: upcomingRes.rows.map(mapFixture),
+      leagueLeaders,
+      streaks
+    });
+  } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
+});
+
 // ─── Season Summary (auto-generated wrap for a specific tournament) ───────────
 app.get('/api/tournaments/:tId/season-summary', requireAuth, async (req, res) => {
   try {
@@ -1796,6 +2029,11 @@ async function startServer() {
     FOREIGN KEY (fixture_id) REFERENCES fixtures(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id)
   )`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS birthday_wishes (
+    id TEXT PRIMARY KEY, code TEXT NOT NULL,
+    name TEXT NOT NULL, created_date TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )`);
   // Add is_admin column if not exists (safe for existing DBs)
   try {
     await db.execute(`ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0`);
@@ -1803,6 +2041,10 @@ async function startServer() {
   // Add used_by column to admin_keys if not exists
   try {
     await db.execute(`ALTER TABLE admin_keys ADD COLUMN used_by TEXT DEFAULT NULL`);
+  } catch(_) { /* column already exists */ }
+  // Add played_at column to fixtures if not exists (tracks when result was entered)
+  try {
+    await db.execute(`ALTER TABLE fixtures ADD COLUMN played_at TEXT DEFAULT NULL`);
   } catch(_) { /* column already exists */ }
   // Seed admin keys (10 unique keys, one per admin user)
   const adminKeys = [
