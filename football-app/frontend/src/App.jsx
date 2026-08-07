@@ -15,6 +15,8 @@ import ArrowBackIosNewRoundedIcon from '@mui/icons-material/ArrowBackIosNewRound
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded';
 import StarRoundedIcon from '@mui/icons-material/StarRounded';
 import CompareArrowsRoundedIcon from '@mui/icons-material/CompareArrowsRounded';
+import DashboardRoundedIcon from '@mui/icons-material/DashboardRounded';
+import BoltRoundedIcon from '@mui/icons-material/BoltRounded';
 import theme from './theme/theme';
 import LoginPage from './pages/LoginPage';
 import AdminLoginPage from './pages/AdminLoginPage';
@@ -25,6 +27,8 @@ import GroupKnockoutPage from './pages/GroupKnockoutPage';
 import TopStatsPage from './pages/TopStatsPage';
 import GlobalTeamsPage from './pages/GlobalTeamsPage';
 import RivalTrackerPage from './pages/RivalTrackerPage';
+import DashboardPage from './pages/DashboardPage';
+import EloRatingsPage from './pages/EloRatingsPage';
 import ActiveUsers from './components/ActiveUsers';
 
 const DRAWER_WIDTH = 248;
@@ -32,6 +36,10 @@ const DRAWER_WIDTH = 248;
 const NAV_ITEMS = [
   { key: 'fixtures', label: 'Fixtures',icon: <SportsSoccerRoundedIcon /> },
   { key: 'table',    label: 'Table',   icon: <LeaderboardRoundedIcon /> },
+];
+
+const NAV_ITEMS_KO = [
+  { key: 'fixtures', label: 'Fixtures', icon: <SportsSoccerRoundedIcon /> },
 ];
 
 const NAV_ITEMS_GK = [
@@ -47,7 +55,7 @@ export default function App() {
   const [user, setUser] = useState(() => JSON.parse(localStorage.getItem('fp_user') || 'null'));
   const [activeTournament, setActiveTournament] = useState(null);
   const [activeTab, setActiveTab] = useState('fixtures');
-  const [globalTab, setGlobalTab] = useState('tournaments');
+  const [globalTab, setGlobalTab] = useState('dashboard');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState(null);
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
@@ -85,6 +93,19 @@ export default function App() {
       <Divider sx={{ borderColor:'rgba(255,255,255,0.06)', mb:1 }} />
 
       <List dense sx={{ px:0.75 }}>
+        <ListItem disablePadding>
+          <ListItemButton selected={!activeTournament && globalTab === 'dashboard'}
+            onClick={()=>{ setActiveTournament(null); setGlobalTab('dashboard'); setDrawerOpen(false); }}
+            sx={{ borderRadius:1.5, mb:0.25, py:0.75,
+              '&.Mui-selected':{ background:'linear-gradient(90deg,rgba(64,196,255,0.15),rgba(0,230,118,0.08))',
+                borderLeft:'3px solid #40c4ff',
+                '& .MuiListItemIcon-root':{ color:'#40c4ff' },
+                '& .MuiListItemText-primary':{ color:'#40c4ff', fontWeight:700 } },
+              '&:hover':{ background:'rgba(255,255,255,0.04)' } }}>
+            <ListItemIcon sx={{ minWidth:32 }}><DashboardRoundedIcon sx={{ fontSize:18 }} /></ListItemIcon>
+            <ListItemText primary="Dashboard" primaryTypographyProps={{ fontSize:13 }} />
+          </ListItemButton>
+        </ListItem>
         <ListItem disablePadding>
           <ListItemButton selected={!activeTournament && globalTab === 'tournaments'} onClick={handleBack}
             sx={{ borderRadius:1.5, mb:0.25, py:0.75,
@@ -136,6 +157,19 @@ export default function App() {
             <ListItemText primary="Rival Tracker" primaryTypographyProps={{ fontSize:13 }} />
           </ListItemButton>
         </ListItem>
+        <ListItem disablePadding>
+          <ListItemButton selected={!activeTournament && globalTab === 'elo'}
+            onClick={()=>{ setActiveTournament(null); setGlobalTab('elo'); setDrawerOpen(false); }}
+            sx={{ borderRadius:1.5, mb:0.25, py:0.75,
+              '&.Mui-selected':{ background:'linear-gradient(90deg,rgba(255,152,0,0.15),rgba(255,215,0,0.08))',
+                borderLeft:'3px solid #ff9800',
+                '& .MuiListItemIcon-root':{ color:'#ff9800' },
+                '& .MuiListItemText-primary':{ color:'#ff9800', fontWeight:700 } },
+              '&:hover':{ background:'rgba(255,255,255,0.04)' } }}>
+            <ListItemIcon sx={{ minWidth:32 }}><BoltRoundedIcon sx={{ fontSize:18 }} /></ListItemIcon>
+            <ListItemText primary="Power Ratings" primaryTypographyProps={{ fontSize:13 }} />
+          </ListItemButton>
+        </ListItem>
       </List>
 
       {activeTournament && (
@@ -149,7 +183,7 @@ export default function App() {
           </Box>
           <Divider sx={{ borderColor:'rgba(255,255,255,0.06)', mb:1, mx:1.5 }} />
           <List dense sx={{ px:0.75 }}>
-            {(activeTournament.type === 'group_knockout' ? NAV_ITEMS_GK : NAV_ITEMS).map(item => (
+            {(activeTournament.type === 'group_knockout' ? NAV_ITEMS_GK : activeTournament.type === 'knockout' ? NAV_ITEMS_KO : NAV_ITEMS).map(item => (
               <ListItem key={item.key} disablePadding>
                 <ListItemButton selected={activeTab===item.key}
                   onClick={()=>{ setActiveTab(item.key); setDrawerOpen(false); }}
@@ -202,13 +236,15 @@ export default function App() {
 
   const renderPage = () => {
     if (!activeTournament) {
+      if (globalTab === 'dashboard') return <DashboardPage />;
       if (globalTab === 'stats') return <TopStatsPage />;
       if (globalTab === 'teams') return <GlobalTeamsPage isAdmin={isAdmin} />;
       if (globalTab === 'rivals') return <RivalTrackerPage />;
+      if (globalTab === 'elo') return <EloRatingsPage />;
       return <TournamentsPage onSelect={handleSelect} isAdmin={isAdmin} />;
     }
     if (activeTournament.type === 'group_knockout') {
-      if (activeTab === 'table')    return <GroupKnockoutPage tournament={activeTournament} view="table" isAdmin={isAdmin} />;
+      if (activeTab === 'table') return <GroupKnockoutPage tournament={activeTournament} view="table" isAdmin={isAdmin} />;
       return <GroupKnockoutPage tournament={activeTournament} view="fixtures" isAdmin={isAdmin} />;
     }
     switch (activeTab) {
@@ -316,7 +352,7 @@ export default function App() {
                   backdropFilter:'blur(12px)' }}>
                 <BottomNavigation value={activeTab} onChange={(_,v)=>setActiveTab(v)}
                   sx={{ bgcolor:'transparent', height:58 }}>
-                  {(activeTournament.type === 'group_knockout' ? NAV_ITEMS_GK : NAV_ITEMS).map(item => (
+                  {(activeTournament.type === 'group_knockout' ? NAV_ITEMS_GK : activeTournament.type === 'knockout' ? NAV_ITEMS_KO : NAV_ITEMS).map(item => (
                     <BottomNavigationAction key={item.key} value={item.key}
                       label={item.label} icon={item.icon}
                       sx={{

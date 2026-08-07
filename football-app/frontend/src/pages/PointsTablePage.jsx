@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Box, Card, Chip, Stack, Typography, Avatar } from '@mui/material';
 import EmojiEventsRoundedIcon from '@mui/icons-material/EmojiEventsRounded';
 import TrendingUpRoundedIcon from '@mui/icons-material/TrendingUpRounded';
 import PageHeader from '../components/PageHeader';
 import EmptyState from '../components/EmptyState';
 import LoadingState from '../components/LoadingState';
+import ExportButton from '../components/ExportButton';
 import { getTable } from '../api/footballApi';
 
 const COLORS = ['#00e676','#651fff','#ff5252','#ffd740','#40c4ff','#ff6e40','#b2ff59','#e040fb','#64ffda','#ff4081'];
@@ -162,6 +163,7 @@ function TeamRow({ row, rank, isLast }) {
 export default function PointsTablePage({ tournament }) {
   const [table,   setTable]   = useState([]);
   const [loading, setLoading] = useState(true);
+  const tableRef = useRef(null);
 
   const load = async () => {
     try { const r = await getTable(tournament.id); setTable(r.data); } catch {}
@@ -173,25 +175,30 @@ export default function PointsTablePage({ tournament }) {
 
   return (
     <Box>
-      <PageHeader
-        icon="📊"
-        title="Table"
-        subtitle={`${tournament.name} · Live standings`}
-        action={leader?.mp > 0 ? (
-          <Chip
-            icon={<TrendingUpRoundedIcon sx={{ fontSize: '13px !important' }} />}
-            label={leader.name}
-            size="small"
-            sx={{
-              bgcolor: 'rgba(0,230,118,0.12)', border: '1px solid rgba(0,230,118,0.3)',
-              fontWeight: 700, color: 'primary.main',
-              fontSize: { xs: 10, sm: 11 }, height: 24,
-              maxWidth: { xs: 130, sm: 200 },
-              '& .MuiChip-label': { overflow: 'hidden', textOverflow: 'ellipsis' },
-            }}
-          />
-        ) : null}
-      />
+      <Box sx={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+        <PageHeader
+          icon="📊"
+          title="Table"
+          subtitle={`${tournament.name} · Live standings`}
+          action={leader?.mp > 0 ? (
+            <Chip
+              icon={<TrendingUpRoundedIcon sx={{ fontSize: '13px !important' }} />}
+              label={leader.name}
+              size="small"
+              sx={{
+                bgcolor: 'rgba(0,230,118,0.12)', border: '1px solid rgba(0,230,118,0.3)',
+                fontWeight: 700, color: 'primary.main',
+                fontSize: { xs: 10, sm: 11 }, height: 24,
+                maxWidth: { xs: 130, sm: 200 },
+                '& .MuiChip-label': { overflow: 'hidden', textOverflow: 'ellipsis' },
+              }}
+            />
+          ) : null}
+        />
+        {table.length > 0 && (
+          <ExportButton targetRef={tableRef} filename={`${tournament.name}-table`} title={`${tournament.name} Points Table`} />
+        )}
+      </Box>
 
       {loading ? (
         <LoadingState variant="rows" count={5} />
@@ -199,7 +206,7 @@ export default function PointsTablePage({ tournament }) {
         <EmptyState icon="📊" title="No standings yet"
           subtitle="Add teams and play fixtures to see the table" />
       ) : (
-        <Card sx={{
+        <Card ref={tableRef} sx={{
           background: 'linear-gradient(160deg, #111827 0%, #131d2e 100%)',
           borderRadius: { xs: 2, sm: 3 },
           overflow: 'hidden',
