@@ -848,8 +848,8 @@ app.post('/api/tournaments/:tId/regenerate-quarter-finals', requireAuth, async (
       const [A, B, C, D] = actualGroups;
       const qfMatches = [
         { matchNumber: 1, home: qualifiers[A][0]?.teamId, away: qualifiers[D][1]?.teamId },
-        { matchNumber: 2, home: qualifiers[A][1]?.teamId, away: qualifiers[D][0]?.teamId },
-        { matchNumber: 3, home: qualifiers[B][0]?.teamId, away: qualifiers[C][1]?.teamId },
+        { matchNumber: 2, home: qualifiers[B][0]?.teamId, away: qualifiers[C][1]?.teamId },
+        { matchNumber: 3, home: qualifiers[A][1]?.teamId, away: qualifiers[D][0]?.teamId },
         { matchNumber: 4, home: qualifiers[B][1]?.teamId, away: qualifiers[C][0]?.teamId },
       ];
       const seedUpdates = [];
@@ -946,10 +946,12 @@ app.post('/api/tournaments/:tId/seed-knockout', requireAuth, async (req, res) =>
     if (isQFBracket) {
       // 4 groups → QF: GA1 vs GD2, GA2 vs GD1, GB1 vs GC2, GB2 vs GC1
       const [A, B, C, D] = actualGroups; // 'A','B','C','D'
+      // QF 1 & QF 2 feed into SF 1, QF 3 & QF 4 feed into SF 2.
+      // Cross A/D with B/C so same-group teams can only meet in the Final.
       const qfMatches = [
         { matchNumber: 1, home: qualifiers[A][0].teamId, away: qualifiers[D][1].teamId },
-        { matchNumber: 2, home: qualifiers[A][1].teamId, away: qualifiers[D][0].teamId },
-        { matchNumber: 3, home: qualifiers[B][0].teamId, away: qualifiers[C][1].teamId },
+        { matchNumber: 2, home: qualifiers[B][0].teamId, away: qualifiers[C][1].teamId },
+        { matchNumber: 3, home: qualifiers[A][1].teamId, away: qualifiers[D][0].teamId },
         { matchNumber: 4, home: qualifiers[B][1].teamId, away: qualifiers[C][0].teamId },
       ];
 
@@ -962,7 +964,7 @@ app.post('/api/tournaments/:tId/seed-knockout', requireAuth, async (req, res) =>
       if (updates.length > 0) await db.batch(updates, 'write');
       return res.json({
         message: 'Quarter-finals seeded',
-        seeding: `${A}1 vs ${D}2 | ${A}2 vs ${D}1 | ${B}1 vs ${C}2 | ${B}2 vs ${C}1`,
+        seeding: `${A}1 vs ${D}2 | ${B}1 vs ${C}2 | ${A}2 vs ${D}1 | ${B}2 vs ${C}1`,
         qualifiers: Object.fromEntries(actualGroups.map(g => [
           `Group ${g}`,
           qualifiers[g].map((team, i) => `${i + 1}. ${team.name} (${team.pts}pts, GD${team.gd >= 0 ? '+' : ''}${team.gd})`)
