@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
 import {
   Box, CssBaseline, Drawer, AppBar, Toolbar, IconButton,
   Typography, List, ListItem, ListItemButton, ListItemIcon,
@@ -34,8 +35,8 @@ import ActiveUsers from './components/ActiveUsers';
 const DRAWER_WIDTH = 248;
 
 const NAV_ITEMS = [
-  { key: 'fixtures', label: 'Fixtures',icon: <SportsSoccerRoundedIcon /> },
-  { key: 'table',    label: 'Table',   icon: <LeaderboardRoundedIcon /> },
+  { key: 'fixtures', label: 'Fixtures', icon: <SportsSoccerRoundedIcon /> },
+  { key: 'table',    label: 'Table',    icon: <LeaderboardRoundedIcon /> },
 ];
 
 const NAV_ITEMS_KO = [
@@ -53,14 +54,36 @@ function getInitials(name = '') {
 
 export default function App() {
   const [user, setUser] = useState(() => JSON.parse(localStorage.getItem('fp_user') || 'null'));
-  const [activeTournament, setActiveTournament] = useState(null);
+  const [activeTournament, setActiveTournament] = useState(() => {
+    const stored = sessionStorage.getItem('fp_active_tournament');
+    return stored ? JSON.parse(stored) : null;
+  });
   const [activeTab, setActiveTab] = useState('fixtures');
-  const [globalTab, setGlobalTab] = useState('dashboard');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState(null);
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  const isAdminRoute = window.location.pathname.startsWith('/admin');
+  const navigate = useNavigate();
+  const location = useLocation();
+  const isAdminRoute = location.pathname.startsWith('/admin');
   const isAdmin = user?.isAdmin === true;
+
+  // Persist active tournament in sessionStorage so it survives reload
+  useEffect(() => {
+    if (activeTournament) {
+      sessionStorage.setItem('fp_active_tournament', JSON.stringify(activeTournament));
+    } else {
+      sessionStorage.removeItem('fp_active_tournament');
+    }
+  }, [activeTournament]);
+
+  // Sync activeTab from URL when inside a tournament
+  useEffect(() => {
+    if (activeTournament && location.pathname.startsWith('/tournament/')) {
+      const parts = location.pathname.split('/');
+      const tab = parts[3] || 'fixtures';
+      setActiveTab(tab);
+    }
+  }, [location.pathname, activeTournament]);
 
   useEffect(() => {
     const stored = JSON.parse(localStorage.getItem('fp_user') || 'null');
@@ -70,10 +93,54 @@ export default function App() {
       .catch(() => {});
   }, []);
 
-  const handleLogin    = (u) => setUser(u);
-  const handleLogout   = () => { localStorage.removeItem('fp_user'); setUser(null); setActiveTournament(null); setAnchorEl(null); };
-  const handleSelect   = (t) => { setActiveTournament(t); setActiveTab('fixtures'); setDrawerOpen(false); };
-  const handleBack     = () => { setActiveTournament(null); setGlobalTab('tournaments'); setDrawerOpen(false); };
+  const handleLogin  = (u) => setUser(u);
+  const handleLogout = () => {
+    localStorage.removeItem('fp_user');
+    sessionStorage.removeItem('fp_active_tournament');
+    setUser(null);
+    setActiveTournament(null);
+    setAnchorEl(null);
+    navigate('/');
+  };
+  const handleSelect = (t) => {
+    setActiveTournament(t);
+    setActiveTab('fixtures');
+    setDrawerOpen(false);
+    navigate(`/tournament/${t.id}/fixtures`);
+  };
+  const handleBack = () => {
+    setActiveTournament(null);
+    setDrawerOpen(false);
+    navigate('/tournaments');
+  };
+
+  const handleGlobalNav = (tab) => {
+    setActiveTournament(null);
+    setDrawerOpen(false);
+    navigate(`/${tab === 'dashboard' ? '' : tab}`);
+  };
+
+  const handleTabChange = (tab) => {
+    setActiveTab(tab);
+    setDrawerOpen(false);
+    if (activeTournament) {
+      navigate(`/tournament/${activeTournament.id}/${tab}`);
+    }
+  };
+
+  // Determine which global tab is active from URL
+  const getActiveGlobalTab = () => {
+    const path = location.pathname;
+    if (path === '/' || path === '/dashboard') return 'dashboard';
+    if (path === '/tournaments') return 'tournaments';
+    if (path === '/teams') return 'teams';
+    if (path === '/stats') return 'stats';
+    if (path === '/rivals') return 'rivals';
+    if (path === '/elo') return 'elo';
+    return '';
+  };
+
+  const globalTab = getActiveGlobalTab();
 
   const drawerContent = (
     <Box sx={{ display:'flex', flexDirection:'column', height:'100%', py:1.5 }}>
@@ -95,7 +162,7 @@ export default function App() {
       <List dense sx={{ px:0.75 }}>
         <ListItem disablePadding>
           <ListItemButton selected={!activeTournament && globalTab === 'dashboard'}
-            onClick={()=>{ setActiveTournament(null); setGlobalTab('dashboard'); setDrawerOpen(false); }}
+            onClick={() => handleGlobalNav('dashboard')}
             sx={{ borderRadius:1.5, mb:0.25, py:0.75,
               '&.Mui-selected':{ background:'linear-gradient(90deg,rgba(64,196,255,0.15),rgba(0,230,118,0.08))',
                 borderLeft:'3px solid #40c4ff',
@@ -107,7 +174,8 @@ export default function App() {
           </ListItemButton>
         </ListItem>
         <ListItem disablePadding>
-          <ListItemButton selected={!activeTournament && globalTab === 'tournaments'} onClick={handleBack}
+          <ListItemButton selected={!activeTournament && globalTab === 'tournaments'}
+            onClick={() => handleGlobalNav('tournaments')}
             sx={{ borderRadius:1.5, mb:0.25, py:0.75,
               '&.Mui-selected':{ background:'linear-gradient(90deg,rgba(0,230,118,0.15),rgba(101,31,255,0.08))',
                 borderLeft:'3px solid #00e676',
@@ -120,7 +188,7 @@ export default function App() {
         </ListItem>
         <ListItem disablePadding>
           <ListItemButton selected={!activeTournament && globalTab === 'teams'}
-            onClick={()=>{ setActiveTournament(null); setGlobalTab('teams'); setDrawerOpen(false); }}
+            onClick={() => handleGlobalNav('teams')}
             sx={{ borderRadius:1.5, mb:0.25, py:0.75,
               '&.Mui-selected':{ background:'linear-gradient(90deg,rgba(0,230,118,0.15),rgba(101,31,255,0.08))',
                 borderLeft:'3px solid #40c4ff',
@@ -133,7 +201,7 @@ export default function App() {
         </ListItem>
         <ListItem disablePadding>
           <ListItemButton selected={!activeTournament && globalTab === 'stats'}
-            onClick={()=>{ setActiveTournament(null); setGlobalTab('stats'); setDrawerOpen(false); }}
+            onClick={() => handleGlobalNav('stats')}
             sx={{ borderRadius:1.5, mb:0.25, py:0.75,
               '&.Mui-selected':{ background:'linear-gradient(90deg,rgba(255,215,0,0.15),rgba(255,152,0,0.08))',
                 borderLeft:'3px solid #ffd700',
@@ -146,7 +214,7 @@ export default function App() {
         </ListItem>
         <ListItem disablePadding>
           <ListItemButton selected={!activeTournament && globalTab === 'rivals'}
-            onClick={()=>{ setActiveTournament(null); setGlobalTab('rivals'); setDrawerOpen(false); }}
+            onClick={() => handleGlobalNav('rivals')}
             sx={{ borderRadius:1.5, mb:0.25, py:0.75,
               '&.Mui-selected':{ background:'linear-gradient(90deg,rgba(255,82,82,0.15),rgba(255,152,0,0.08))',
                 borderLeft:'3px solid #ff5252',
@@ -159,7 +227,7 @@ export default function App() {
         </ListItem>
         <ListItem disablePadding>
           <ListItemButton selected={!activeTournament && globalTab === 'elo'}
-            onClick={()=>{ setActiveTournament(null); setGlobalTab('elo'); setDrawerOpen(false); }}
+            onClick={() => handleGlobalNav('elo')}
             sx={{ borderRadius:1.5, mb:0.25, py:0.75,
               '&.Mui-selected':{ background:'linear-gradient(90deg,rgba(255,152,0,0.15),rgba(255,215,0,0.08))',
                 borderLeft:'3px solid #ff9800',
@@ -186,7 +254,7 @@ export default function App() {
             {(activeTournament.type === 'group_knockout' ? NAV_ITEMS_GK : activeTournament.type === 'knockout' ? NAV_ITEMS_KO : NAV_ITEMS).map(item => (
               <ListItem key={item.key} disablePadding>
                 <ListItemButton selected={activeTab===item.key}
-                  onClick={()=>{ setActiveTab(item.key); setDrawerOpen(false); }}
+                  onClick={() => handleTabChange(item.key)}
                   sx={{ borderRadius:1.5, mb:0.25, py:0.75,
                     '&.Mui-selected':{ background:'linear-gradient(90deg,rgba(0,230,118,0.15),rgba(101,31,255,0.08))',
                       borderLeft:'3px solid #00e676',
@@ -234,15 +302,9 @@ export default function App() {
     </Box>
   );
 
-  const renderPage = () => {
-    if (!activeTournament) {
-      if (globalTab === 'dashboard') return <DashboardPage />;
-      if (globalTab === 'stats') return <TopStatsPage />;
-      if (globalTab === 'teams') return <GlobalTeamsPage isAdmin={isAdmin} />;
-      if (globalTab === 'rivals') return <RivalTrackerPage />;
-      if (globalTab === 'elo') return <EloRatingsPage />;
-      return <TournamentsPage onSelect={handleSelect} isAdmin={isAdmin} />;
-    }
+  // Tournament page renderer based on type and tab
+  const renderTournamentPage = () => {
+    if (!activeTournament) return <Navigate to="/tournaments" replace />;
     if (activeTournament.type === 'group_knockout') {
       if (activeTab === 'table') return <GroupKnockoutPage tournament={activeTournament} view="table" isAdmin={isAdmin} />;
       return <GroupKnockoutPage tournament={activeTournament} view="fixtures" isAdmin={isAdmin} />;
@@ -258,7 +320,10 @@ export default function App() {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       {!user ? (
-        isAdminRoute ? <AdminLoginPage onLogin={handleLogin} /> : <LoginPage onLogin={handleLogin} />
+        <Routes>
+          <Route path="/admin" element={<AdminLoginPage onLogin={handleLogin} />} />
+          <Route path="*" element={<LoginPage onLogin={handleLogin} />} />
+        </Routes>
       ) : isAdminRoute && !isAdmin ? (
         <AdminLoginPage onLogin={handleLogin} />
       ) : (
@@ -341,7 +406,17 @@ export default function App() {
 
             {/* Page content */}
             <Box sx={{ flex:1, p:{ xs:1.5, sm:2.5, md:3 }, maxWidth:1100, width:'100%', mx:'auto' }}>
-              {renderPage()}
+              <Routes>
+                <Route path="/" element={<DashboardPage />} />
+                <Route path="/dashboard" element={<DashboardPage />} />
+                <Route path="/tournaments" element={<TournamentsPage onSelect={handleSelect} isAdmin={isAdmin} />} />
+                <Route path="/teams" element={<GlobalTeamsPage isAdmin={isAdmin} />} />
+                <Route path="/stats" element={<TopStatsPage />} />
+                <Route path="/rivals" element={<RivalTrackerPage />} />
+                <Route path="/elo" element={<EloRatingsPage />} />
+                <Route path="/tournament/:id/*" element={renderTournamentPage()} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
             </Box>
 
             {/* ── Mobile Bottom Navigation (only when inside a tournament) ── */}
@@ -350,7 +425,7 @@ export default function App() {
                 sx={{ position:'fixed', bottom:0, left:0, right:0, zIndex:20,
                   bgcolor:'rgba(10,14,26,0.97)', borderTop:'1px solid rgba(255,255,255,0.08)',
                   backdropFilter:'blur(12px)' }}>
-                <BottomNavigation value={activeTab} onChange={(_,v)=>setActiveTab(v)}
+                <BottomNavigation value={activeTab} onChange={(_,v) => handleTabChange(v)}
                   sx={{ bgcolor:'transparent', height:58 }}>
                   {(activeTournament.type === 'group_knockout' ? NAV_ITEMS_GK : activeTournament.type === 'knockout' ? NAV_ITEMS_KO : NAV_ITEMS).map(item => (
                     <BottomNavigationAction key={item.key} value={item.key}
