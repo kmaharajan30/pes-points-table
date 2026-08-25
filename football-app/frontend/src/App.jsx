@@ -18,6 +18,7 @@ import StarRoundedIcon from '@mui/icons-material/StarRounded';
 import CompareArrowsRoundedIcon from '@mui/icons-material/CompareArrowsRounded';
 import DashboardRoundedIcon from '@mui/icons-material/DashboardRounded';
 import BoltRoundedIcon from '@mui/icons-material/BoltRounded';
+import HeadsetMicRoundedIcon from '@mui/icons-material/HeadsetMicRounded';
 import theme from './theme/theme';
 import LoginPage from './pages/LoginPage';
 import AdminLoginPage from './pages/AdminLoginPage';
@@ -30,6 +31,7 @@ import GlobalTeamsPage from './pages/GlobalTeamsPage';
 import RivalTrackerPage from './pages/RivalTrackerPage';
 import DashboardPage from './pages/DashboardPage';
 import EloRatingsPage from './pages/EloRatingsPage';
+import VoiceChatPage from './pages/VoiceChatPage';
 import ActiveUsers from './components/ActiveUsers';
 
 const DRAWER_WIDTH = 248;
@@ -137,6 +139,7 @@ export default function App() {
     if (path === '/stats') return 'stats';
     if (path === '/rivals') return 'rivals';
     if (path === '/elo') return 'elo';
+    if (path === '/voice') return 'voice';
     return '';
   };
 
@@ -236,6 +239,19 @@ export default function App() {
               '&:hover':{ background:'rgba(255,255,255,0.04)' } }}>
             <ListItemIcon sx={{ minWidth:32 }}><BoltRoundedIcon sx={{ fontSize:18 }} /></ListItemIcon>
             <ListItemText primary="Power Ratings" primaryTypographyProps={{ fontSize:13 }} />
+          </ListItemButton>
+        </ListItem>
+        <ListItem disablePadding>
+          <ListItemButton selected={!activeTournament && globalTab === 'voice'}
+            onClick={() => handleGlobalNav('voice')}
+            sx={{ borderRadius:1.5, mb:0.25, py:0.75,
+              '&.Mui-selected':{ background:'linear-gradient(90deg,rgba(64,196,255,0.15),rgba(0,230,118,0.08))',
+                borderLeft:'3px solid #40c4ff',
+                '& .MuiListItemIcon-root':{ color:'#40c4ff' },
+                '& .MuiListItemText-primary':{ color:'#40c4ff', fontWeight:700 } },
+              '&:hover':{ background:'rgba(255,255,255,0.04)' } }}>
+            <ListItemIcon sx={{ minWidth:32 }}><HeadsetMicRoundedIcon sx={{ fontSize:18 }} /></ListItemIcon>
+            <ListItemText primary="Voice Chat" primaryTypographyProps={{ fontSize:13 }} />
           </ListItemButton>
         </ListItem>
       </List>
@@ -414,6 +430,7 @@ export default function App() {
                 <Route path="/stats" element={<TopStatsPage />} />
                 <Route path="/rivals" element={<RivalTrackerPage />} />
                 <Route path="/elo" element={<EloRatingsPage />} />
+                <Route path="/voice" element={<VoiceChatPage />} />
                 <Route path="/tournament/:id/*" element={renderTournamentPage()} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>

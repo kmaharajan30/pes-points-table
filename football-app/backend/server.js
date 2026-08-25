@@ -4,8 +4,18 @@ const cors    = require('cors');
 const { v4: uuidv4 } = require('uuid');
 const { createClient } = require('@libsql/client');
 const path     = require('path');
+const http     = require('http');
+const { Server: SocketIO } = require('socket.io');
 
 const app = express();
+const server = http.createServer(app);
+const io = new SocketIO(server, {
+  cors: {
+    origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : '*',
+    credentials: true
+  }
+});
+
 app.use(cors({
   origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : '*',
   credentials: true
@@ -1974,6 +1984,101 @@ app.get('/api/tournaments/:tId/season-summary', requireAuth, async (req, res) =>
   } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
 });
 
+// ─── Voice Chat (WebRTC Signaling via Socket.io) ─────────────────────────────
+const voiceRooms = new Map(); // roomId -> Map(socketId -> { userId, userName, muted })
+
+io.on('connection', (socket) => {
+  let currentRoom = null;
+  let userInfo = null;
+
+  socket.on('voice:join', ({ roomId, userId, userName }) => {
+    if (!roomId || !userId || !userName) return;
+    currentRoom = roomId;
+    userInfo = { userId, userName, muted: false };
+
+    socket.join(roomId);
+    if (!voiceRooms.has(roomId)) voiceRooms.set(roomId, new Map());
+    voiceRooms.get(roomId).set(socket.id, userInfo);
+
+    // Tell the new user about existing peers
+    const existingPeers = [];
+    voiceRooms.get(roomId).forEach((info, sid) => {
+      if (sid !== socket.id) existingPeers.push({ socketId: sid, ...info });
+    });
+    socket.emit('voice:peers', existingPeers);
+
+    // Tell existing peers about the new user
+    socket.to(roomId).emit('voice:user-joined', { socketId: socket.id, ...userInfo });
+
+    // Broadcast updated participant list
+    broadcastVoiceParticipants(roomId);
+  });
+
+  socket.on('voice:signal', ({ to, signal }) => {
+    io.to(to).emit('voice:signal', { from: socket.id, signal });
+  });
+
+  socket.on('voice:mute', ({ muted }) => {
+    if (!currentRoom || !voiceRooms.has(currentRoom)) return;
+    const room = voiceRooms.get(currentRoom);
+    if (room.has(socket.id)) {
+      room.get(socket.id).muted = muted;
+      socket.to(currentRoom).emit('voice:user-muted', { socketId: socket.id, muted });
+      broadcastVoiceParticipants(currentRoom);
+    }
+  });
+
+  socket.on('voice:leave', () => {
+    leaveRoom(socket);
+  });
+
+  socket.on('disconnect', () => {
+    leaveRoom(socket);
+  });
+
+  function leaveRoom(sock) {
+    if (!currentRoom) return;
+    const room = voiceRooms.get(currentRoom);
+    if (room) {
+      room.delete(sock.id);
+      if (room.size === 0) {
+        voiceRooms.delete(currentRoom);
+      } else {
+        broadcastVoiceParticipants(currentRoom);
+      }
+    }
+    sock.to(currentRoom).emit('voice:user-left', { socketId: sock.id });
+    sock.leave(currentRoom);
+    currentRoom = null;
+    userInfo = null;
+  }
+});
+
+function broadcastVoiceParticipants(roomId) {
+  const room = voiceRooms.get(roomId);
+  if (!room) return;
+  const participants = [];
+  room.forEach((info, sid) => { participants.push({ socketId: sid, ...info }); });
+  io.to(roomId).emit('voice:participants', participants);
+}
+
+// REST endpoint: get available voice rooms for a group code
+app.get('/api/voice/rooms/:code', (req, res) => {
+  const { code } = req.params;
+  const rooms = [];
+  voiceRooms.forEach((participants, roomId) => {
+    if (roomId.startsWith(`voice-${code}-`)) {
+      const name = roomId.replace(`voice-${code}-`, '');
+      rooms.push({
+        id: roomId,
+        name,
+        participants: Array.from(participants.values()).map(p => ({ userId: p.userId, userName: p.userName, muted: p.muted }))
+      });
+    }
+  });
+  res.json(rooms);
+});
+
 // ─── Start ────────────────────────────────────────────────────────────────────
 async function startServer() {
   initDb();
@@ -2069,7 +2174,7 @@ async function startServer() {
   }
 
   const PORT = process.env.PORT || 5000;
-  app.listen(PORT, () => console.log(`⚽  Football API on :${PORT}`));
+  server.listen(PORT, () => console.log(`⚽  Football API on :${PORT}`));
 }
 
 startServer().catch(err => { console.error('Failed to start:', err); process.exit(1); });
