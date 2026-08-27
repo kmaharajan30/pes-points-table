@@ -11,6 +11,7 @@ import BoltRoundedIcon from '@mui/icons-material/BoltRounded';
 import ExpandMoreRoundedIcon from '@mui/icons-material/ExpandMoreRounded';
 import ExpandLessRoundedIcon from '@mui/icons-material/ExpandLessRounded';
 import PageHeader from '../components/PageHeader';
+import SeasonFilter from '../components/SeasonFilter';
 import { getEloRatings } from '../api/footballApi';
 
 const pulse = keyframes`
@@ -39,22 +40,32 @@ export default function EloRatingsPage() {
   const [loading, setLoading] = useState(true);
   const [showAll, setShowAll] = useState(false);
   const [expandedTeam, setExpandedTeam] = useState(null);
+  const [seasonFilter, setSeasonFilter] = useState(null);
+
+  const loadRatings = async (season) => {
+    setLoading(true);
+    try {
+      const res = await getEloRatings(season === 'overall' ? undefined : season);
+      setData(res.data);
+    } catch (e) { console.error(e); }
+    setLoading(false);
+  };
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        const res = await getEloRatings();
-        setData(res.data);
-      } catch (e) { console.error(e); }
-      setLoading(false);
-    };
-    load();
-  }, []);
+    if (seasonFilter !== null) loadRatings(seasonFilter);
+  }, [seasonFilter]);
+
+  const handleSeasonChange = (val) => {
+    setSeasonFilter(val);
+    setShowAll(false);
+    setExpandedTeam(null);
+  };
 
   if (loading) {
     return (
       <Box>
-        <PageHeader icon={<BoltRoundedIcon />} title="Power Ratings" subtitle="ELO-based team rankings" />
+        <PageHeader icon={<BoltRoundedIcon />} title="Power Ratings" subtitle="ELO-based team rankings"
+          action={<SeasonFilter value={seasonFilter} onChange={handleSeasonChange} accentColor="#ff9800" />} />
         <Box sx={{ display:'flex', flexDirection:'column', gap:2 }}>
           {[1,2,3,4,5].map(i => <Skeleton key={i} variant="rounded" height={60} sx={{ bgcolor:'rgba(255,255,255,0.05)', borderRadius:2 }} />)}
         </Box>
@@ -65,7 +76,8 @@ export default function EloRatingsPage() {
   if (!data || data.ratings.length === 0) {
     return (
       <Box>
-        <PageHeader icon={<BoltRoundedIcon />} title="Power Ratings" subtitle="ELO-based team rankings" />
+        <PageHeader icon={<BoltRoundedIcon />} title="Power Ratings" subtitle="ELO-based team rankings"
+          action={<SeasonFilter value={seasonFilter} onChange={handleSeasonChange} accentColor="#ff9800" />} />
         <Box sx={{ textAlign:'center', py:8 }}>
           <Typography sx={{ fontSize:48, mb:2 }}>⚡</Typography>
           <Typography variant="h6" sx={{ fontWeight:700, mb:1 }}>No Ratings Yet</Typography>
@@ -78,10 +90,15 @@ export default function EloRatingsPage() {
   const maxElo = Math.max(...data.ratings.map(r => r.elo));
   const displayRatings = showAll ? data.ratings : data.ratings.slice(0, 10);
 
+  const subtitleLabel = seasonFilter === 'overall'
+    ? `${data.ratings.length} teams ranked by ELO`
+    : `Season ${seasonFilter} · ${data.ratings.length} teams ranked`;
+
   return (
     <Box>
       <PageHeader icon={<BoltRoundedIcon />} title="Power Ratings"
-        subtitle={`${data.ratings.length} teams ranked by ELO`} />
+        subtitle={subtitleLabel}
+        action={<SeasonFilter value={seasonFilter} onChange={handleSeasonChange} accentColor="#ff9800" />} />
 
       {/* Top 3 Podium */}
       {data.ratings.length >= 3 && (

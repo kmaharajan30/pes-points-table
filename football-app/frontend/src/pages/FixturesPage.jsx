@@ -402,7 +402,7 @@ function KnockoutBracket({ tournament, teams, bracket, onResult, onDelete, onAdv
                 <Stack spacing={1.5}>
                   {round.matches.map(match=>(
                     <KnockoutMatch key={match.matchNumber} match={match}
-                      onResult={onResult} onDelete={onDelete} isCurrentRound={isActive} />
+                      onResult={onResult} onDelete={onDelete} isCurrentRound={isActive} isAdmin={isAdmin} />
                   ))}
                 </Stack>
               </Box>
@@ -414,7 +414,7 @@ function KnockoutBracket({ tournament, teams, bracket, onResult, onDelete, onAdv
   );
 }
 
-function KnockoutMatch({ match, onResult, onDelete, isCurrentRound }) {
+function KnockoutMatch({ match, onResult, onDelete, isCurrentRound, isAdmin }) {
   const homeName = match.homeTeam?.name;
   const awayName = match.awayTeam?.name;
   const winnerName = match.winner?.name;

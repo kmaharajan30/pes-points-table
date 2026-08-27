@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box, Button, Card, CardContent, CardActionArea,
   Dialog, DialogTitle, DialogContent, DialogActions,
@@ -24,7 +24,6 @@ import CheckBoxOutlineBlankRoundedIcon from '@mui/icons-material/CheckBoxOutline
 import CalendarTodayRoundedIcon from '@mui/icons-material/CalendarTodayRounded';
 import LockRoundedIcon from '@mui/icons-material/LockRounded';
 import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded';
-import FilterListRoundedIcon from '@mui/icons-material/FilterListRounded';
 import PageHeader from '../components/PageHeader';
 import EmptyState from '../components/EmptyState';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -47,6 +46,14 @@ const crownBounce = keyframes`
 const starTwinkle = keyframes`
   0%, 100% { opacity: 0.3; transform: scale(0.8); }
   50%       { opacity: 1;   transform: scale(1.2); }
+`;
+const activePulse = keyframes`
+  0%, 100% { box-shadow: 0 0 0 0 rgba(0,230,118,0.4); }
+  50%      { box-shadow: 0 0 0 6px rgba(0,230,118,0); }
+`;
+const glowSlide = keyframes`
+  0%   { background-position: -100% center; }
+  100% { background-position: 200% center; }
 `;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -101,9 +108,12 @@ export default function TournamentsPage({ onSelect, isAdmin }) {
       setSeasons(r.data);
       const active = r.data.find(s => s.status === 'active');
       setActiveSeasonNum(active?.seasonNumber ?? null);
-      // Default filter to the active season (or latest)
+      // Always default to the active season on first load
       if (active) {
-        setFilterSeasonNum(prev => prev === undefined ? active.seasonNumber : prev);
+        setFilterSeasonNum(prev => prev ?? active.seasonNumber);
+      } else if (r.data.length > 0) {
+        // No active season — default to the latest season
+        setFilterSeasonNum(prev => prev ?? r.data[r.data.length - 1].seasonNumber);
       }
     } catch (_) {}
     setSeasonsLoading(false);
@@ -122,10 +132,10 @@ export default function TournamentsPage({ onSelect, isAdmin }) {
   useEffect(() => { loadSeasons(); }, [loadSeasons]);
   useEffect(() => { loadTournaments(filterSeasonNum); }, [filterSeasonNum, loadTournaments]);
 
-  // ── Season filter tabs ─────────────────────────────────────────────────────
+  // ── Season tab change ────────────────────────────────────────────────────
   const handleFilterChange = (_, val) => {
-    if (val === null) return; // keep at least one selected
-    setFilterSeasonNum(val === 'all' ? null : val);
+    if (val === undefined || val === null) return;
+    setFilterSeasonNum(val);
   };
 
   // ── Create season ──────────────────────────────────────────────────────────
@@ -237,18 +247,37 @@ export default function TournamentsPage({ onSelect, isAdmin }) {
         title="Tournaments"
         subtitle="Manage seasons and tournaments"
         action={
-          isAdmin && activeSeason && (
-            <Button
-              variant="contained" size="small"
-              startIcon={<AddRoundedIcon sx={{ fontSize: '16px !important' }} />}
-              onClick={handleOpenCreate}
-              sx={{
-                background: 'linear-gradient(135deg,#00e676,#00b248)', color: '#000',
-                fontSize: { xs: 11, sm: 13 }, px: { xs: 1.5, sm: 2 }, py: { xs: 0.6, sm: 0.75 }, minWidth: 0,
-              }}
-            >
-              <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>New&nbsp;</Box>Tournament
-            </Button>
+          isAdmin && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              {activeSeason && (
+                <Button
+                  variant="outlined" size="small"
+                  startIcon={<LockRoundedIcon sx={{ fontSize: '14px !important' }} />}
+                  onClick={() => setCompleteTarget(activeSeason)}
+                  disabled={seasonActionLoading}
+                  sx={{
+                    fontSize: { xs: 10, sm: 12 }, px: { xs: 1, sm: 1.5 }, py: { xs: 0.5, sm: 0.6 }, minWidth: 0,
+                    borderColor: 'rgba(255,152,0,0.4)', color: '#ff9800',
+                    '&:hover': { borderColor: '#ff9800', bgcolor: 'rgba(255,152,0,0.08)' },
+                  }}
+                >
+                  <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>Complete&nbsp;</Box>Season {activeSeason.seasonNumber}
+                </Button>
+              )}
+              {activeSeason && (
+                <Button
+                  variant="contained" size="small"
+                  startIcon={<AddRoundedIcon sx={{ fontSize: '16px !important' }} />}
+                  onClick={handleOpenCreate}
+                  sx={{
+                    background: 'linear-gradient(135deg,#00e676,#00b248)', color: '#000',
+                    fontSize: { xs: 11, sm: 13 }, px: { xs: 1.5, sm: 2 }, py: { xs: 0.6, sm: 0.75 }, minWidth: 0,
+                  }}
+                >
+                  <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>New&nbsp;</Box>Tournament
+                </Button>
+              )}
+            </Box>
           )
         }
       />
@@ -263,7 +292,6 @@ export default function TournamentsPage({ onSelect, isAdmin }) {
         filterSeasonNum={filterSeasonNum}
         onFilterChange={handleFilterChange}
         onCreateSeason={handleCreateSeason}
-        onCompleteRequest={setCompleteTarget}
         canCreateNewSeason={canCreateNewSeason}
         noSeasonsYet={noSeasonsYet}
         existingTournamentCount={tournaments.length}
@@ -484,34 +512,43 @@ export default function TournamentsPage({ onSelect, isAdmin }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Season Panel
+// Season Tabs Panel — pill-style scrollable tabs
 // ─────────────────────────────────────────────────────────────────────────────
 function SeasonPanel({
   seasons, loading, seasonError, actionLoading, isAdmin,
   filterSeasonNum, onFilterChange,
-  onCreateSeason, onCompleteRequest,
+  onCreateSeason,
   canCreateNewSeason, noSeasonsYet,
   existingTournamentCount, onMigrate,
 }) {
+  const scrollRef = useRef(null);
+
+  // Auto-scroll the selected tab into view
+  useEffect(() => {
+    if (!scrollRef.current) return;
+    const t = setTimeout(() => {
+      const el = scrollRef.current?.querySelector('[data-selected="true"]');
+      if (el) el.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    }, 80);
+    return () => clearTimeout(t);
+  }, [filterSeasonNum]);
+
   if (loading) {
     return (
       <Box sx={{ mb: 2 }}>
-        <Skeleton variant="rounded" height={48} sx={{ bgcolor: 'rgba(255,255,255,0.05)', borderRadius: 2 }} />
+        <Skeleton variant="rounded" height={52} sx={{ bgcolor: 'rgba(255,255,255,0.05)', borderRadius: 3 }} />
       </Box>
     );
   }
 
-  const activeSeason = seasons.find(s => s.status === 'active') ?? null;
   const hasMigratable = noSeasonsYet && existingTournamentCount > 0;
 
   return (
     <Box sx={{ mb: 2 }}>
-      {/* Error */}
       {seasonError && (
         <Alert severity="error" sx={{ mb: 1.5, fontSize: 12 }}>{seasonError}</Alert>
       )}
 
-      {/* No seasons yet */}
       {noSeasonsYet ? (
         <Box sx={{
           p: 2.5, borderRadius: 2.5,
@@ -565,150 +602,157 @@ function SeasonPanel({
         </Box>
       ) : (
         <Box sx={{
-          p: { xs: 1.5, sm: 2 }, borderRadius: 2.5,
-          background: 'rgba(255,255,255,0.02)',
-          border: '1px solid rgba(255,255,255,0.07)',
+          borderRadius: 3,
+          background: 'linear-gradient(135deg, rgba(17,24,39,0.8), rgba(26,32,53,0.6))',
+          border: '1px solid rgba(255,255,255,0.06)',
+          p: { xs: 1, sm: 1.25 },
+          position: 'relative',
+          overflow: 'hidden',
         }}>
-          {/* Header row */}
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5, flexWrap: 'wrap', gap: 1 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <CalendarTodayRoundedIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
-              <Typography sx={{ fontWeight: 700, fontSize: 13, color: 'text.primary' }}>Seasons</Typography>
-              {activeSeason && (
-                <Chip
-                  label={`Season ${activeSeason.seasonNumber} Active`}
-                  size="small"
-                  sx={{ fontSize: 10, height: 20, bgcolor: 'rgba(0,230,118,0.12)', color: '#00e676', border: '1px solid rgba(0,230,118,0.3)' }}
-                />
-              )}
-            </Box>
-            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-              {isAdmin && activeSeason && (
-                <Button
-                  size="small" variant="outlined"
-                  startIcon={<LockRoundedIcon sx={{ fontSize: '14px !important' }} />}
-                  onClick={() => onCompleteRequest(activeSeason)}
-                  disabled={actionLoading}
+          {/* Subtle background shimmer */}
+          <Box sx={{
+            position: 'absolute', inset: 0, opacity: 0.4, pointerEvents: 'none',
+            background: 'linear-gradient(90deg, transparent, rgba(0,230,118,0.03) 30%, rgba(101,31,255,0.03) 70%, transparent)',
+            backgroundSize: '200% 100%',
+            animation: `${glowSlide} 8s ease-in-out infinite`,
+          }} />
+
+          {actionLoading && (
+            <LinearProgress sx={{ position: 'absolute', top: 0, left: 0, right: 0, borderRadius: 1, height: 2 }} />
+          )}
+
+          {/* Scrollable pills row */}
+          <Box
+            ref={scrollRef}
+            sx={{
+              display: 'flex', alignItems: 'center', gap: { xs: 0.75, sm: 1 },
+              overflowX: 'auto', overflowY: 'hidden',
+              scrollbarWidth: 'none', '&::-webkit-scrollbar': { display: 'none' },
+              py: 0.5, px: 0.5,
+              position: 'relative',
+            }}
+          >
+            {seasons.map(s => {
+              const isActive = s.status === 'active';
+              const isSelected = filterSeasonNum === s.seasonNumber;
+              const color = isActive ? '#00e676' : '#a0aec0';
+
+              return (
+                <Box
+                  key={s.seasonNumber}
+                  data-selected={isSelected}
+                  onClick={() => onFilterChange(null, s.seasonNumber)}
                   sx={{
-                    fontSize: 11, py: 0.4, px: 1.25,
-                    borderColor: 'rgba(255,152,0,0.4)', color: '#ff9800',
-                    '&:hover': { borderColor: '#ff9800', bgcolor: 'rgba(255,152,0,0.08)' },
+                    display: 'flex', alignItems: 'center', gap: { xs: 0.75, sm: 1 },
+                    px: { xs: 1.5, sm: 2 }, py: { xs: 0.75, sm: 0.9 },
+                    borderRadius: 10, cursor: 'pointer', flexShrink: 0,
+                    position: 'relative', overflow: 'hidden',
+                    transition: 'all 0.25s cubic-bezier(0.4,0,0.2,1)',
+                    border: '1px solid',
+                    ...(isSelected ? {
+                      background: isActive
+                        ? 'linear-gradient(135deg, rgba(0,230,118,0.15), rgba(0,178,72,0.08))'
+                        : 'linear-gradient(135deg, rgba(160,174,192,0.12), rgba(160,174,192,0.06))',
+                      borderColor: isActive ? 'rgba(0,230,118,0.4)' : 'rgba(160,174,192,0.3)',
+                      boxShadow: isActive
+                        ? '0 0 16px rgba(0,230,118,0.2), inset 0 1px 0 rgba(0,230,118,0.15)'
+                        : '0 0 12px rgba(160,174,192,0.1), inset 0 1px 0 rgba(255,255,255,0.05)',
+                    } : {
+                      background: 'rgba(255,255,255,0.03)',
+                      borderColor: 'rgba(255,255,255,0.06)',
+                      '&:hover': {
+                        background: 'rgba(255,255,255,0.06)',
+                        borderColor: 'rgba(255,255,255,0.12)',
+                        transform: 'translateY(-1px)',
+                      },
+                    }),
                   }}
                 >
-                  Complete Season {activeSeason.seasonNumber}
-                </Button>
-              )}
-              {isAdmin && canCreateNewSeason && (
-                <Button
-                  size="small" variant="outlined"
-                  startIcon={<PlayArrowRoundedIcon sx={{ fontSize: '14px !important' }} />}
-                  onClick={onCreateSeason}
-                  disabled={actionLoading}
-                  sx={{
-                    fontSize: 11, py: 0.4, px: 1.25,
-                    borderColor: 'rgba(0,230,118,0.4)', color: '#00e676',
-                    '&:hover': { borderColor: '#00e676', bgcolor: 'rgba(0,230,118,0.08)' },
-                  }}
-                >
-                  {`Start Season ${(seasons[seasons.length - 1]?.seasonNumber ?? 0) + 1}`}
-                </Button>
-              )}
-            </Box>
-          </Box>
+                  {/* Active glow overlay */}
+                  {isSelected && isActive && (
+                    <Box sx={{
+                      position: 'absolute', inset: 0, pointerEvents: 'none',
+                      background: 'linear-gradient(90deg, transparent, rgba(0,230,118,0.08), transparent)',
+                      backgroundSize: '200% 100%',
+                      animation: `${glowSlide} 3s ease-in-out infinite`,
+                    }} />
+                  )}
 
-          {actionLoading && <LinearProgress sx={{ mb: 1.5, borderRadius: 1 }} />}
+                  {/* Status dot */}
+                  <Box sx={{
+                    width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                    bgcolor: isActive ? '#00e676' : 'rgba(160,174,192,0.4)',
+                    ...(isActive && isSelected ? {
+                      animation: `${activePulse} 2s ease-in-out infinite`,
+                    } : {}),
+                  }} />
 
-          {/* Season filter chips */}
-          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mr: 0.5 }}>
-              <FilterListRoundedIcon sx={{ fontSize: 13, color: 'text.secondary' }} />
-              <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, fontWeight: 600 }}>FILTER</Typography>
-            </Box>
+                  {/* Season label */}
+                  <Typography sx={{
+                    fontSize: { xs: 12, sm: 13 },
+                    fontWeight: isSelected ? 800 : 600,
+                    color: isSelected ? color : 'rgba(255,255,255,0.5)',
+                    whiteSpace: 'nowrap', position: 'relative',
+                    letterSpacing: isSelected ? 0.3 : 0,
+                  }}>
+                    Season {s.seasonNumber}
+                  </Typography>
 
-            <ToggleButtonGroup
-              value={filterSeasonNum === null ? 'all' : filterSeasonNum}
-              exclusive size="small"
-              onChange={onFilterChange}
-              sx={{ flexWrap: 'wrap', gap: 0.5 }}
-            >
-              <ToggleButton value="all" sx={{
-                fontSize: 11, fontWeight: 700, px: 1.25, py: 0.4, border: '1px solid rgba(255,255,255,0.12)',
-                borderRadius: '8px !important',
-                '&.Mui-selected': { bgcolor: 'rgba(255,255,255,0.1)', color: '#fff', borderColor: 'rgba(255,255,255,0.3)' },
-              }}>
-                All
-              </ToggleButton>
-              {seasons.map(s => (
-                <ToggleButton key={s.seasonNumber} value={s.seasonNumber} sx={{
-                  fontSize: 11, fontWeight: 700, px: 1.25, py: 0.4,
-                  border: '1px solid rgba(255,255,255,0.12)',
-                  borderRadius: '8px !important',
-                  '&.Mui-selected': {
-                    bgcolor: s.status === 'active' ? 'rgba(0,230,118,0.15)' : 'rgba(255,152,0,0.12)',
-                    color: s.status === 'active' ? '#00e676' : '#ff9800',
-                    borderColor: s.status === 'active' ? 'rgba(0,230,118,0.4)' : 'rgba(255,152,0,0.4)',
-                  },
-                }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    {s.status === 'completed'
-                      ? <LockRoundedIcon sx={{ fontSize: 10 }} />
-                      : <PlayArrowRoundedIcon sx={{ fontSize: 10 }} />}
-                    S{s.seasonNumber}
-                    <Typography component="span" sx={{ fontSize: 9, opacity: 0.7 }}>
-                      ({s.tournamentCount})
-                    </Typography>
+                  {/* Tournament count badge */}
+                  <Box sx={{
+                    px: 0.75, py: 0.1, borderRadius: 1,
+                    fontSize: { xs: 9, sm: 10 }, fontWeight: 700,
+                    bgcolor: isSelected
+                      ? (isActive ? 'rgba(0,230,118,0.2)' : 'rgba(160,174,192,0.15)')
+                      : 'rgba(255,255,255,0.06)',
+                    color: isSelected ? color : 'rgba(255,255,255,0.35)',
+                    lineHeight: 1.6, position: 'relative',
+                  }}>
+                    {s.tournamentCount}
                   </Box>
-                </ToggleButton>
-              ))}
-            </ToggleButtonGroup>
-          </Box>
 
-          {/* Season info row */}
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, mt: 1.5 }}>
-            {seasons.map(s => (
-              <SeasonStatChip key={s.seasonNumber} season={s} />
-            ))}
+                  {/* Lock icon for completed seasons */}
+                  {!isActive && (
+                    <LockRoundedIcon sx={{
+                      fontSize: 10, position: 'relative',
+                      color: isSelected ? 'rgba(160,174,192,0.6)' : 'rgba(255,255,255,0.2)',
+                    }} />
+                  )}
+                </Box>
+              );
+            })}
+
+            {/* New season button (inline with tabs) */}
+            {isAdmin && canCreateNewSeason && (
+              <Box
+                onClick={onCreateSeason}
+                sx={{
+                  display: 'flex', alignItems: 'center', gap: 0.75,
+                  px: { xs: 1.25, sm: 1.75 }, py: { xs: 0.75, sm: 0.9 },
+                  borderRadius: 10, cursor: 'pointer', flexShrink: 0,
+                  border: '1px dashed rgba(0,230,118,0.3)',
+                  background: 'transparent',
+                  transition: 'all 0.2s ease',
+                  opacity: actionLoading ? 0.5 : 1,
+                  pointerEvents: actionLoading ? 'none' : 'auto',
+                  '&:hover': {
+                    background: 'rgba(0,230,118,0.06)',
+                    borderColor: 'rgba(0,230,118,0.5)',
+                    transform: 'translateY(-1px)',
+                  },
+                }}
+              >
+                <AddRoundedIcon sx={{ fontSize: 14, color: '#00e676' }} />
+                <Typography sx={{
+                  fontSize: { xs: 11, sm: 12 }, fontWeight: 600, color: '#00e676', whiteSpace: 'nowrap',
+                }}>
+                  Season {(seasons[seasons.length - 1]?.seasonNumber ?? 0) + 1}
+                </Typography>
+              </Box>
+            )}
           </Box>
         </Box>
       )}
-    </Box>
-  );
-}
-
-function SeasonStatChip({ season }) {
-  const isActive = season.status === 'active';
-  const color    = isActive ? '#00e676' : '#ff9800';
-  const maxTournaments = 10;
-  const pct = Math.min(100, (season.tournamentCount / maxTournaments) * 100);
-
-  return (
-    <Box sx={{
-      px: 1.5, py: 1, borderRadius: 2,
-      bgcolor: isActive ? 'rgba(0,230,118,0.06)' : 'rgba(255,255,255,0.03)',
-      border: `1px solid ${isActive ? 'rgba(0,230,118,0.2)' : 'rgba(255,255,255,0.08)'}`,
-      minWidth: 110,
-    }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-        <Typography sx={{ fontWeight: 700, fontSize: 12, color }}>Season {season.seasonNumber}</Typography>
-        <Chip
-          label={isActive ? 'Active' : 'Done'}
-          size="small"
-          sx={{ height: 16, fontSize: 9, fontWeight: 700,
-            bgcolor: isActive ? 'rgba(0,230,118,0.15)' : 'rgba(255,255,255,0.06)',
-            color: isActive ? '#00e676' : 'text.secondary' }}
-        />
-      </Box>
-      <Typography sx={{ fontSize: 11, color: 'text.secondary', mb: 0.75 }}>
-        {season.tournamentCount}/{maxTournaments} tournaments
-      </Typography>
-      <LinearProgress
-        variant="determinate" value={pct}
-        sx={{
-          height: 3, borderRadius: 2,
-          bgcolor: 'rgba(255,255,255,0.07)',
-          '& .MuiLinearProgress-bar': { bgcolor: color, borderRadius: 2 },
-        }}
-      />
     </Box>
   );
 }
@@ -754,14 +798,6 @@ function TournamentCard({ t, isAdmin, onSelect, onSummary, onDelete }) {
                     <>
                       <Box sx={{ width: 2.5, height: 2.5, borderRadius: '50%', bgcolor: 'rgba(255,255,255,0.25)' }} />
                       <Typography sx={{ fontSize: { xs: 10, sm: 11 }, color: 'text.secondary' }}>{t.season}</Typography>
-                    </>
-                  )}
-                  {t.seasonNumber != null && (
-                    <>
-                      <Box sx={{ width: 2.5, height: 2.5, borderRadius: '50%', bgcolor: 'rgba(255,255,255,0.25)' }} />
-                      <Typography sx={{ fontSize: { xs: 10, sm: 11 }, color: 'rgba(255,255,255,0.35)' }}>
-                        S{t.seasonNumber}
-                      </Typography>
                     </>
                   )}
                 </Box>

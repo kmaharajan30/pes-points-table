@@ -12,6 +12,7 @@ import ExpandMoreRoundedIcon from '@mui/icons-material/ExpandMoreRounded';
 import ExpandLessRoundedIcon from '@mui/icons-material/ExpandLessRounded';
 import WhatshotRoundedIcon from '@mui/icons-material/WhatshotRounded';
 import PageHeader from '../components/PageHeader';
+import SeasonFilter from '../components/SeasonFilter';
 import { getStats } from '../api/footballApi';
 
 const shimmer = keyframes`
@@ -37,24 +38,34 @@ export default function TopStatsPage() {
   const [loading, setLoading] = useState(true);
   const [showAllScorers, setShowAllScorers] = useState(false);
   const [showAllPerformers, setShowAllPerformers] = useState(false);
+  const [seasonFilter, setSeasonFilter] = useState(null);
+
+  const loadStats = async (season) => {
+    setLoading(true);
+    try {
+      const res = await getStats(season === 'overall' ? undefined : season);
+      setStats(res.data);
+    } catch (e) {
+      console.error('Failed to load stats:', e);
+    }
+    setLoading(false);
+  };
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        const res = await getStats();
-        setStats(res.data);
-      } catch (e) {
-        console.error('Failed to load stats:', e);
-      }
-      setLoading(false);
-    };
-    load();
-  }, []);
+    if (seasonFilter !== null) loadStats(seasonFilter);
+  }, [seasonFilter]);
+
+  const handleSeasonChange = (val) => {
+    setSeasonFilter(val);
+    setShowAllScorers(false);
+    setShowAllPerformers(false);
+  };
 
   if (loading) {
     return (
       <Box>
-        <PageHeader icon="⭐" title="Top Performances & Stats" subtitle="Cross-tournament highlights" />
+        <PageHeader icon="⭐" title="Top Performances & Stats" subtitle="Cross-tournament highlights"
+          action={<SeasonFilter value={seasonFilter} onChange={handleSeasonChange} accentColor="#ffd700" />} />
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           {[1, 2, 3].map(i => (
             <Skeleton key={i} variant="rounded" height={180}
@@ -68,7 +79,8 @@ export default function TopStatsPage() {
   if (!stats || (!stats.topPerformers.length && !stats.bestMatch && !stats.topScorers.length)) {
     return (
       <Box>
-        <PageHeader icon="⭐" title="Top Performances & Stats" subtitle="Cross-tournament highlights" />
+        <PageHeader icon="⭐" title="Top Performances & Stats" subtitle="Cross-tournament highlights"
+          action={<SeasonFilter value={seasonFilter} onChange={handleSeasonChange} accentColor="#ffd700" />} />
         <Box sx={{ textAlign: 'center', py: 8 }}>
           <Typography sx={{ fontSize: 48, mb: 2 }}>📊</Typography>
           <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>No Stats Yet</Typography>
@@ -80,13 +92,18 @@ export default function TopStatsPage() {
     );
   }
 
+  const subtitleLabel = seasonFilter === 'overall'
+    ? `Across ${stats.totalTournaments} tournament${stats.totalTournaments !== 1 ? 's' : ''}`
+    : `Season ${seasonFilter} · ${stats.totalTournaments} tournament${stats.totalTournaments !== 1 ? 's' : ''}`;
+
   const topFour = showAllPerformers ? stats.topPerformers : stats.topPerformers.slice(0, 3);
   const scorersToShow = showAllScorers ? stats.topScorers : stats.topScorers.slice(0, 5);
 
   return (
     <Box>
       <PageHeader icon="⭐" title="Top Performances & Stats"
-        subtitle={`Across ${stats.totalTournaments} tournament${stats.totalTournaments !== 1 ? 's' : ''}`} />
+        subtitle={subtitleLabel}
+        action={<SeasonFilter value={seasonFilter} onChange={handleSeasonChange} accentColor="#ffd700" />} />
 
       {/* ─── Top Performers (Rank 1, 2, 3, 3) ─── */}
       {topFour.length > 0 && (
@@ -101,7 +118,7 @@ export default function TopStatsPage() {
               <Typography sx={{ fontWeight: 800, fontSize: { xs: 14, sm: 16 } }}>
                 Top Performers
               </Typography>
-              <Chip label="All Tournaments" size="small"
+              <Chip label={seasonFilter === 'overall' ? 'All Tournaments' : `Season ${seasonFilter}`} size="small"
                 sx={{ ml: 'auto', fontSize: 10, fontWeight: 700, bgcolor: 'rgba(255,215,0,0.12)', color: '#ffd700' }} />
             </Box>
 
