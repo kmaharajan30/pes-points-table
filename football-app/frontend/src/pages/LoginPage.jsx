@@ -53,7 +53,7 @@ export default function LoginPage({ onLogin }) {
         backdropFilter: 'blur(8px)',
       }}>
         <Typography sx={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.5)', letterSpacing: '0.03em' }}>
-          v3.6.0
+          v4.0.0
         </Typography>
       </Box>
       {/* Decorative blobs */}
