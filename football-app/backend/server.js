@@ -318,7 +318,17 @@ app.get('/api/presence/:code', requireAuth, (req, res) => {
 // ─── Tournaments ──────────────────────────────────────────────────────────────
 app.get('/api/tournaments', requireAuth, async (req, res) => {
   try {
-    const result = await db.execute({ sql: 'SELECT * FROM tournaments WHERE code=? ORDER BY created_at DESC', args: [req.user.code] });
+    // Support optional ?season=N filter (season number)
+    const seasonFilter = req.query.season !== undefined ? parseInt(req.query.season) : null;
+    let sql, args;
+    if (seasonFilter !== null && Number.isFinite(seasonFilter)) {
+      sql = 'SELECT * FROM tournaments WHERE code=? AND season_number=? ORDER BY created_at DESC';
+      args = [req.user.code, seasonFilter];
+    } else {
+      sql = 'SELECT * FROM tournaments WHERE code=? ORDER BY created_at DESC';
+      args = [req.user.code];
+    }
+    const result = await db.execute({ sql, args });
     const tournaments = await Promise.all(result.rows.map(async (r) => {
       let winner = null;
       try {
@@ -367,7 +377,7 @@ app.get('/api/tournaments', requireAuth, async (req, res) => {
           }
         }
       } catch(_) {}
-      return { id:r.id, name:r.name, season:r.season, type:r.type, numGroups:r.num_groups, legs:r.legs, createdAt:r.created_at, winner };
+      return { id:r.id, name:r.name, season:r.season, type:r.type, numGroups:r.num_groups, legs:r.legs, createdAt:r.created_at, winner, seasonNumber: r.season_number };
     }));
     res.json(tournaments);
   } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
@@ -375,16 +385,40 @@ app.get('/api/tournaments', requireAuth, async (req, res) => {
 
 app.post('/api/tournaments', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { name, season, type='league', num_groups=2, legs=2, teamIds=[] } = req.body;
+    const { name, season, type='league', num_groups=2, legs=2, teamIds=[], season_number } = req.body;
     if (!name) return res.status(400).json({ error: 'Name required' });
     if (!['league','knockout','group_knockout'].includes(type)) return res.status(400).json({ error: 'type must be league, knockout, or group_knockout' });
     // Prevent duplicate tournament names (case-insensitive) within same group
     const dupCheck = await db.execute({ sql: 'SELECT id FROM tournaments WHERE code=? AND LOWER(name)=LOWER(?)', args: [req.user.code, name.trim()] });
     if (dupCheck.rows.length > 0) return res.status(400).json({ error: 'Tournament with this name already exists' });
+
+    // Season validation
+    let resolvedSeasonNumber = null;
+    if (season_number !== undefined && season_number !== null) {
+      const seasonNum = parseInt(season_number);
+      if (!Number.isFinite(seasonNum)) return res.status(400).json({ error: 'Invalid season_number' });
+      // Verify the season exists and is active
+      const seasonRes = await db.execute({
+        sql: 'SELECT * FROM seasons WHERE code=? AND season_number=?',
+        args: [req.user.code, seasonNum]
+      });
+      if (seasonRes.rows.length === 0) return res.status(400).json({ error: `Season ${seasonNum} does not exist` });
+      if (seasonRes.rows[0].status !== 'active') return res.status(400).json({ error: `Season ${seasonNum} is completed. Start a new season first.` });
+      // Enforce max 10 tournaments per season
+      const countRes = await db.execute({
+        sql: 'SELECT COUNT(*) as c FROM tournaments WHERE code=? AND season_number=?',
+        args: [req.user.code, seasonNum]
+      });
+      if (Number(countRes.rows[0].c) >= 10) {
+        return res.status(400).json({ error: `Season ${seasonNum} already has 10 tournaments (maximum). Complete this season and start Season ${seasonNum + 1}.` });
+      }
+      resolvedSeasonNumber = seasonNum;
+    }
+
     const numGroups = type === 'group_knockout' ? Math.max(2, parseInt(num_groups)||2) : null;
     const numLegs   = type === 'group_knockout' ? (parseInt(legs)===1 ? 1 : 2) : (type === 'league' ? (parseInt(legs)===1 ? 1 : 2) : null);
-    const t = { id:uuidv4(), code:req.user.code, name:name.trim(), season:season||'', type, num_groups:numGroups, legs:numLegs, created_at:new Date().toISOString() };
-    await db.execute({ sql: 'INSERT INTO tournaments (id,code,name,season,type,num_groups,legs,created_at) VALUES (?,?,?,?,?,?,?,?)', args: [t.id,t.code,t.name,t.season,t.type,t.num_groups,t.legs,t.created_at] });
+    const t = { id:uuidv4(), code:req.user.code, name:name.trim(), season:season||'', type, num_groups:numGroups, legs:numLegs, created_at:new Date().toISOString(), season_number: resolvedSeasonNumber };
+    await db.execute({ sql: 'INSERT INTO tournaments (id,code,name,season,type,num_groups,legs,created_at,season_number) VALUES (?,?,?,?,?,?,?,?,?)', args: [t.id,t.code,t.name,t.season,t.type,t.num_groups,t.legs,t.created_at,t.season_number] });
 
     // If global team IDs provided, copy them into this tournament
     if (Array.isArray(teamIds) && teamIds.length > 0) {
@@ -398,7 +432,7 @@ app.post('/api/tournaments', requireAuth, requireAdmin, async (req, res) => {
       }
     }
 
-    res.status(201).json({ id:t.id, name:t.name, season:t.season, type:t.type, numGroups:t.num_groups, legs:t.legs, createdAt:t.created_at });
+    res.status(201).json({ id:t.id, name:t.name, season:t.season, type:t.type, numGroups:t.num_groups, legs:t.legs, createdAt:t.created_at, seasonNumber: t.season_number });
   } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
 });
 
@@ -1173,8 +1207,20 @@ app.get('/api/stats', requireAuth, async (req, res) => {
   try {
     const code = req.user.code;
 
-    // Get all tournaments for this code
-    const tournamentsRes = await db.execute({ sql: 'SELECT * FROM tournaments WHERE code=? ORDER BY created_at DESC', args: [code] });
+    // Support ?season=N for season-based filtering (omit or 'overall' for all-time)
+    const seasonFilter = req.query.season !== undefined && req.query.season !== 'overall'
+      ? parseInt(req.query.season) : null;
+
+    // Get all tournaments for this code (optionally filtered by season)
+    let tourSql, tourArgs;
+    if (seasonFilter !== null && Number.isFinite(seasonFilter)) {
+      tourSql = 'SELECT * FROM tournaments WHERE code=? AND season_number=? ORDER BY created_at DESC';
+      tourArgs = [code, seasonFilter];
+    } else {
+      tourSql = 'SELECT * FROM tournaments WHERE code=? ORDER BY created_at DESC';
+      tourArgs = [code];
+    }
+    const tournamentsRes = await db.execute({ sql: tourSql, args: tourArgs });
     const tournaments = tournamentsRes.rows;
 
     if (tournaments.length === 0) {
@@ -1600,8 +1646,19 @@ app.get('/api/team-rivals/:teamName1/:teamName2', requireAuth, async (req, res) 
 // ─── ELO Power Ratings ────────────────────────────────────────────────────────
 app.get('/api/elo-ratings', requireAuth, async (req, res) => {
   try {
-    // Get all played fixtures across all tournaments for this user's group
-    const tourRes = await db.execute({ sql: 'SELECT id FROM tournaments WHERE code=?', args: [req.user.code] });
+    // Support ?season=N for season-based filtering (omit or 'overall' for all-time)
+    const seasonFilter = req.query.season !== undefined && req.query.season !== 'overall'
+      ? parseInt(req.query.season) : null;
+
+    let tourSql, tourArgs;
+    if (seasonFilter !== null && Number.isFinite(seasonFilter)) {
+      tourSql = 'SELECT id FROM tournaments WHERE code=? AND season_number=?';
+      tourArgs = [req.user.code, seasonFilter];
+    } else {
+      tourSql = 'SELECT id FROM tournaments WHERE code=?';
+      tourArgs = [req.user.code];
+    }
+    const tourRes = await db.execute({ sql: tourSql, args: tourArgs });
     if (tourRes.rows.length === 0) return res.json({ ratings: [], history: [] });
 
     const tournamentIds = tourRes.rows.map(t => t.id);
@@ -2079,6 +2136,120 @@ app.get('/api/voice/rooms/:code', (req, res) => {
   res.json(rooms);
 });
 
+// ─── Seasons ──────────────────────────────────────────────────────────────────
+// Returns all seasons for the user's group, plus info on active season
+app.get('/api/seasons', requireAuth, async (req, res) => {
+  try {
+    const result = await db.execute({
+      sql: 'SELECT * FROM seasons WHERE code=? ORDER BY season_number ASC',
+      args: [req.user.code]
+    });
+    // Count tournaments per season
+    const seasons = await Promise.all(result.rows.map(async (s) => {
+      const countRes = await db.execute({
+        sql: 'SELECT COUNT(*) as c FROM tournaments WHERE code=? AND season_number=?',
+        args: [req.user.code, s.season_number]
+      });
+      return {
+        id: s.id,
+        seasonNumber: s.season_number,
+        status: s.status,
+        createdAt: s.created_at,
+        completedAt: s.completed_at,
+        tournamentCount: Number(countRes.rows[0].c)
+      };
+    }));
+    res.json(seasons);
+  } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
+});
+
+// Create Season 1 (or next season if previous is completed)
+app.post('/api/seasons', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    // Find the latest season
+    const latest = await db.execute({
+      sql: 'SELECT * FROM seasons WHERE code=? ORDER BY season_number DESC LIMIT 1',
+      args: [req.user.code]
+    });
+    if (latest.rows.length > 0) {
+      const lastSeason = latest.rows[0];
+      // Cannot create new season if there's already an active one
+      if (lastSeason.status === 'active') {
+        return res.status(400).json({ error: `Season ${lastSeason.season_number} is still active. Complete it first before starting a new season.` });
+      }
+    }
+    const newSeasonNumber = latest.rows.length > 0 ? latest.rows[0].season_number + 1 : 1;
+    const season = {
+      id: uuidv4(),
+      code: req.user.code,
+      season_number: newSeasonNumber,
+      status: 'active',
+      created_at: new Date().toISOString(),
+      completed_at: null
+    };
+    await db.execute({
+      sql: 'INSERT INTO seasons (id,code,season_number,status,created_at,completed_at) VALUES (?,?,?,?,?,?)',
+      args: [season.id, season.code, season.season_number, season.status, season.created_at, season.completed_at]
+    });
+    res.status(201).json({ id: season.id, seasonNumber: season.season_number, status: season.status, createdAt: season.created_at });
+  } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
+});
+
+// ─── Migrate existing tournaments → Season 1 ─────────────────────────────────
+// One-time migration: creates Season 1 (if it doesn't exist) and assigns all
+// tournaments that have no season_number to Season 1.
+app.post('/api/seasons/migrate-to-season1', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    // Check if Season 1 already exists for this group
+    const existing = await db.execute({
+      sql: 'SELECT * FROM seasons WHERE code=? AND season_number=1',
+      args: [req.user.code]
+    });
+
+    if (existing.rows.length === 0) {
+      // Create Season 1 as active
+      await db.execute({
+        sql: 'INSERT INTO seasons (id,code,season_number,status,created_at,completed_at) VALUES (?,?,?,?,?,?)',
+        args: [uuidv4(), req.user.code, 1, 'active', new Date().toISOString(), null]
+      });
+    }
+
+    // Assign all tournaments without a season_number to Season 1
+    const updateRes = await db.execute({
+      sql: 'UPDATE tournaments SET season_number=1 WHERE code=? AND (season_number IS NULL OR season_number = 0)',
+      args: [req.user.code]
+    });
+
+    const moved = updateRes.rowsAffected ?? 0;
+    const seasonStatus = existing.rows.length > 0 ? existing.rows[0].status : 'active';
+
+    res.json({
+      message: `Migration complete. Season 1 ${existing.rows.length > 0 ? 'already existed' : 'created'}. ${moved} tournament(s) assigned to Season 1.`,
+      seasonCreated: existing.rows.length === 0,
+      seasonStatus,
+      tournamentsMoved: moved,
+    });
+  } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
+});
+
+// Complete a season
+app.post('/api/seasons/:num/complete', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const seasonNum = parseInt(req.params.num);
+    const seasonRes = await db.execute({
+      sql: 'SELECT * FROM seasons WHERE code=? AND season_number=?',
+      args: [req.user.code, seasonNum]
+    });
+    if (seasonRes.rows.length === 0) return res.status(404).json({ error: 'Season not found' });
+    if (seasonRes.rows[0].status === 'completed') return res.status(400).json({ error: 'Season is already completed' });
+    await db.execute({
+      sql: 'UPDATE seasons SET status=?, completed_at=? WHERE code=? AND season_number=?',
+      args: ['completed', new Date().toISOString(), req.user.code, seasonNum]
+    });
+    res.json({ message: `Season ${seasonNum} completed` });
+  } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
+});
+
 // ─── Start ────────────────────────────────────────────────────────────────────
 async function startServer() {
   initDb();
@@ -2141,9 +2312,21 @@ async function startServer() {
     name TEXT NOT NULL, created_date TEXT NOT NULL,
     created_at TEXT NOT NULL
   )`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS seasons (
+    id TEXT PRIMARY KEY,
+    code TEXT NOT NULL,
+    season_number INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL,
+    completed_at TEXT DEFAULT NULL
+  )`);
   // Add is_admin column if not exists (safe for existing DBs)
   try {
     await db.execute(`ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0`);
+  } catch(_) { /* column already exists */ }
+  // Add season_number column to tournaments if not exists
+  try {
+    await db.execute(`ALTER TABLE tournaments ADD COLUMN season_number INTEGER DEFAULT NULL`);
   } catch(_) { /* column already exists */ }
   // Add used_by column to admin_keys if not exists
   try {
