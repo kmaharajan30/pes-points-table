@@ -1779,37 +1779,50 @@ app.delete('/api/birthday/:id', requireAuth, requireAdmin, async (req, res) => {
 // ─── Dashboard / Season Overview ──────────────────────────────────────────────
 app.get('/api/dashboard', requireAuth, async (req, res) => {
   try {
-    const tourRes = await db.execute({ sql: 'SELECT * FROM tournaments WHERE code=? ORDER BY created_at DESC', args: [req.user.code] });
-    if (tourRes.rows.length === 0) return res.json({ activeTournaments: [], recentResults: [], upcomingFixtures: [], leagueLeaders: [], streaks: [] });
+    const code = req.user.code;
+    const tourRes = await db.execute({ sql: 'SELECT * FROM tournaments WHERE code=? ORDER BY created_at DESC', args: [code] });
+    if (tourRes.rows.length === 0) return res.json({ activeTournaments: [], recentResults: [], upcomingFixtures: [], leagueLeaders: [], streaks: [], seasonInfo: null, lastChampion: null, seasonTopScorer: null, seasonTopElo: null, seasonTopPerformer: null });
 
     const tournamentIds = tourRes.rows.map(t => t.id);
     const placeholders = tournamentIds.map(() => '?').join(',');
 
-    // Recent results (last 5 played matches, ordered by when result was entered)
-    const recentRes = await db.execute({
-      sql: `SELECT f.*, t.name as tournament_name FROM fixtures f
-            JOIN tournaments t ON f.tournament_id = t.id
-            WHERE f.tournament_id IN (${placeholders}) AND f.played = 1
-            ORDER BY COALESCE(f.played_at, '') DESC, f.rowid DESC LIMIT 5`,
-      args: [...tournamentIds]
-    });
+    // ── Batch load ALL data in parallel ──────────────────────────────────
+    const [recentRes, upcomingRes, teamsRes, allFixRes, knockoutRoundsRes, seasonsRes] = await Promise.all([
+      db.execute({
+        sql: `SELECT f.*, t.name as tournament_name FROM fixtures f
+              JOIN tournaments t ON f.tournament_id = t.id
+              WHERE f.tournament_id IN (${placeholders}) AND f.played = 1
+              ORDER BY COALESCE(f.played_at, '') DESC, f.rowid DESC LIMIT 5`,
+        args: [...tournamentIds]
+      }),
+      db.execute({
+        sql: `SELECT f.*, t.name as tournament_name FROM fixtures f
+              JOIN tournaments t ON f.tournament_id = t.id
+              WHERE f.tournament_id IN (${placeholders}) AND f.played = 0
+              AND f.home_team_id IS NOT NULL AND f.away_team_id IS NOT NULL
+              ORDER BY f.rowid LIMIT 5`,
+        args: [...tournamentIds]
+      }),
+      db.execute({ sql: `SELECT * FROM teams WHERE tournament_id IN (${placeholders})`, args: [...tournamentIds] }),
+      db.execute({ sql: `SELECT * FROM fixtures WHERE tournament_id IN (${placeholders}) ORDER BY rowid`, args: [...tournamentIds] }),
+      db.execute({ sql: `SELECT * FROM knockout_rounds WHERE tournament_id IN (${placeholders})`, args: [...tournamentIds] }),
+      db.execute({ sql: 'SELECT * FROM seasons WHERE code=? ORDER BY season_number DESC', args: [code] }),
+    ]);
 
-    // Upcoming fixtures (next 5 unplayed with teams assigned)
-    const upcomingRes = await db.execute({
-      sql: `SELECT f.*, t.name as tournament_name FROM fixtures f
-            JOIN tournaments t ON f.tournament_id = t.id
-            WHERE f.tournament_id IN (${placeholders}) AND f.played = 0
-            AND f.home_team_id IS NOT NULL AND f.away_team_id IS NOT NULL
-            ORDER BY f.rowid LIMIT 5`,
-      args: [...tournamentIds]
-    });
-
-    // Get all teams for name lookup
-    const teamsRes = await db.execute({
-      sql: `SELECT * FROM teams WHERE tournament_id IN (${placeholders})`,
-      args: [...tournamentIds]
-    });
     const teamById = Object.fromEntries(teamsRes.rows.map(t => [t.id, t]));
+    const allFixtures = allFixRes.rows;
+
+    // Group fixtures by tournament for fast lookups
+    const fixByTour = {};
+    for (const f of allFixtures) {
+      if (!fixByTour[f.tournament_id]) fixByTour[f.tournament_id] = [];
+      fixByTour[f.tournament_id].push(f);
+    }
+    const koRoundsByTour = {};
+    for (const r of knockoutRoundsRes.rows) {
+      if (!koRoundsByTour[r.tournament_id]) koRoundsByTour[r.tournament_id] = [];
+      koRoundsByTour[r.tournament_id].push(r);
+    }
 
     const mapFixture = (f) => ({
       id: f.id, tournamentId: f.tournament_id, tournamentName: f.tournament_name,
@@ -1820,248 +1833,201 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
       round: f.round, leg: f.leg
     });
 
-    // League leaders (top of each active league tournament)
+    // ── Helper: compute table from in-memory fixtures ────────────────────
+    const computeTableFromFixtures = (tourId) => {
+      const tTeams = teamsRes.rows.filter(t => t.tournament_id === tourId);
+      const tFix = (fixByTour[tourId] || []).filter(f => f.fixture_type === 'league' && f.played === 1);
+      const table = {};
+      for (const t of tTeams) {
+        table[t.id] = { name: t.name, mp: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, gd: 0, pts: 0 };
+      }
+      for (const f of tFix) {
+        const h = table[f.home_team_id], a = table[f.away_team_id];
+        if (!h || !a) continue;
+        h.mp++; a.mp++;
+        h.gf += f.home_score; h.ga += f.away_score;
+        a.gf += f.away_score; a.ga += f.home_score;
+        if (f.home_score > f.away_score) { h.w++; h.pts += 3; a.l++; }
+        else if (f.home_score < f.away_score) { a.w++; a.pts += 3; h.l++; }
+        else { h.d++; a.d++; h.pts++; a.pts++; }
+      }
+      return Object.values(table)
+        .map(t => ({ ...t, gd: t.gf - t.ga }))
+        .sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf)
+        .filter(t => t.mp > 0 || true); // include all
+    };
+
+    // ── Helper: compute winner for a tournament from in-memory data ──────
+    const computeWinner = (t) => {
+      const fixes = fixByTour[t.id] || [];
+      if (t.type === 'league') {
+        const table = computeTableFromFixtures(t.id);
+        if (table.length > 0 && table[0].mp > 0) {
+          const unplayed = fixes.filter(f => f.fixture_type === 'league' && f.played === 0).length;
+          if (unplayed === 0) return { champion: table[0].name, runnerUp: table[1]?.name || null };
+        }
+      } else if (t.type === 'knockout') {
+        const koFixes = fixes.filter(f => f.fixture_type === 'knockout');
+        if (koFixes.length > 0) {
+          const maxRound = Math.max(...koFixes.map(f => f.round));
+          const finalLegs = koFixes.filter(f => f.round === maxRound);
+          const leg1 = finalLegs.find(f => f.leg === 1);
+          const leg2 = finalLegs.find(f => f.leg === 2);
+          const winnerId = knockoutWinner(leg1, leg2);
+          if (winnerId) {
+            const loserId = winnerId === leg1?.home_team_id ? leg1?.away_team_id : leg1?.home_team_id;
+            return { champion: teamById[winnerId]?.name, runnerUp: loserId ? teamById[loserId]?.name : null };
+          }
+        }
+      } else if (t.type === 'group_knockout') {
+        const koFixes = fixes.filter(f => f.fixture_type === 'knockout');
+        if (koFixes.length > 0) {
+          const maxRound = Math.max(...koFixes.map(f => f.round));
+          const koRounds = koRoundsByTour[t.id] || [];
+          const isFinal = koRounds.some(r => r.round === maxRound && r.round_name === 'Final');
+          if (isFinal) {
+            const fl = koFixes.find(f => f.round === maxRound && f.leg === 1);
+            if (fl && fl.played) {
+              const wid = fl.home_score > fl.away_score ? fl.home_team_id : fl.away_score > fl.home_score ? fl.away_team_id : null;
+              const lid = wid === fl.home_team_id ? fl.away_team_id : fl.home_team_id;
+              if (wid) return { champion: teamById[wid]?.name, runnerUp: lid ? teamById[lid]?.name : null };
+            }
+          }
+        }
+      }
+      return null;
+    };
+
+    // ── League Leaders ───────────────────────────────────────────────────
     const leagueLeaders = [];
     for (const t of tourRes.rows) {
-      if (t.type === 'league') {
-        const table = await computeTable(t.id);
-        if (table.length > 0 && table[0].mp > 0) {
-          const totalFixtures = await db.execute({ sql: 'SELECT COUNT(*) as c FROM fixtures WHERE tournament_id=? AND fixture_type=?', args: [t.id, 'league'] });
-          const playedFixtures = await db.execute({ sql: 'SELECT COUNT(*) as c FROM fixtures WHERE tournament_id=? AND fixture_type=? AND played=1', args: [t.id, 'league'] });
-          leagueLeaders.push({
-            tournament: t.name, leader: table[0].name, pts: table[0].pts,
-            matchday: playedFixtures.rows[0].c, totalMatchdays: totalFixtures.rows[0].c,
-            table: table.slice(0, 3)
-          });
-        }
+      if (t.type !== 'league') continue;
+      const table = computeTableFromFixtures(t.id);
+      if (table.length > 0 && table[0].mp > 0) {
+        const fixes = fixByTour[t.id] || [];
+        const leagueFixes = fixes.filter(f => f.fixture_type === 'league');
+        leagueLeaders.push({
+          tournament: t.name, leader: table[0].name, pts: table[0].pts,
+          matchday: leagueFixes.filter(f => f.played === 1).length,
+          totalMatchdays: leagueFixes.length,
+          table: table.slice(0, 3)
+        });
       }
     }
 
-    // Win streaks (find teams on hot streaks)
-    const allPlayedRes = await db.execute({
-      sql: `SELECT f.* FROM fixtures f
-            WHERE f.tournament_id IN (${placeholders}) AND f.played = 1
-            ORDER BY f.rowid DESC`,
-      args: [...tournamentIds]
-    });
-
+    // ── Win Streaks (from all played fixtures, newest first) ─────────────
+    const allPlayed = [...allFixtures].filter(f => f.played === 1).reverse();
     const teamStreaks = {};
-    for (const f of allPlayedRes.rows) {
+    for (const f of allPlayed) {
       const homeName = teamById[f.home_team_id]?.name;
       const awayName = teamById[f.away_team_id]?.name;
       if (!homeName || !awayName) continue;
-
-      // Track consecutive wins
       if (!teamStreaks[homeName]) teamStreaks[homeName] = { wins: 0, counting: true };
       if (!teamStreaks[awayName]) teamStreaks[awayName] = { wins: 0, counting: true };
-
       if (teamStreaks[homeName].counting) {
-        if (f.home_score > f.away_score) teamStreaks[homeName].wins++;
-        else teamStreaks[homeName].counting = false;
+        if (f.home_score > f.away_score) teamStreaks[homeName].wins++; else teamStreaks[homeName].counting = false;
       }
       if (teamStreaks[awayName].counting) {
-        if (f.away_score > f.home_score) teamStreaks[awayName].wins++;
-        else teamStreaks[awayName].counting = false;
+        if (f.away_score > f.home_score) teamStreaks[awayName].wins++; else teamStreaks[awayName].counting = false;
       }
     }
-
     const streaks = Object.entries(teamStreaks)
       .filter(([_, s]) => s.wins >= 2)
       .map(([name, s]) => ({ team: name, wins: s.wins }))
-      .sort((a, b) => b.wins - a.wins)
-      .slice(0, 5);
+      .sort((a, b) => b.wins - a.wins).slice(0, 5);
 
-    // Active tournaments with progress
-    const activeTournaments = tourRes.rows.slice(0, 5).map(t => {
-      const totalFix = allPlayedRes.rows.filter(f => f.tournament_id === t.id).length;
-      return { id: t.id, name: t.name, type: t.type, season: t.season, matchesPlayed: totalFix };
-    });
+    // ── Active Tournaments ───────────────────────────────────────────────
+    const activeTournaments = tourRes.rows.slice(0, 5).map(t => ({
+      id: t.id, name: t.name, type: t.type, season: t.season,
+      matchesPlayed: (fixByTour[t.id] || []).filter(f => f.played === 1).length
+    }));
 
-    // ── Season info ────────────────────────────────────────────────────────
+    // ── Season Info ──────────────────────────────────────────────────────
     let seasonInfo = null;
-    try {
-      const seasonsRes = await db.execute({
-        sql: 'SELECT * FROM seasons WHERE code=? ORDER BY season_number DESC', args: [req.user.code]
-      });
-      if (seasonsRes.rows.length > 0) {
-        const active = seasonsRes.rows.find(s => s.status === 'active');
-        const activeSeason = active || seasonsRes.rows[0];
-        const seasonTourRes = await db.execute({
-          sql: 'SELECT COUNT(*) as c FROM tournaments WHERE code=? AND season_number=?',
-          args: [req.user.code, activeSeason.season_number]
-        });
-        const seasonFixRes = await db.execute({
-          sql: `SELECT COUNT(*) as total,
-                SUM(CASE WHEN f.played=1 THEN 1 ELSE 0 END) as played,
-                SUM(CASE WHEN f.played=1 THEN f.home_score + f.away_score ELSE 0 END) as goals
-           FROM fixtures f JOIN tournaments t ON f.tournament_id=t.id
-           WHERE t.code=? AND t.season_number=?`,
-          args: [req.user.code, activeSeason.season_number]
-        });
-        seasonInfo = {
-          seasonNumber: activeSeason.season_number,
-          status: activeSeason.status,
-          tournamentCount: Number(seasonTourRes.rows[0].c),
-          totalMatches: Number(seasonFixRes.rows[0]?.total || 0),
-          playedMatches: Number(seasonFixRes.rows[0]?.played || 0),
-          totalGoals: Number(seasonFixRes.rows[0]?.goals || 0),
-          totalSeasons: seasonsRes.rows.length,
-        };
-      }
-    } catch (_) {}
+    if (seasonsRes.rows.length > 0) {
+      const active = seasonsRes.rows.find(s => s.status === 'active') || seasonsRes.rows[0];
+      const sn = active.season_number;
+      const seasonTours = tourRes.rows.filter(t => t.season_number === sn);
+      const seasonFixes = seasonTours.flatMap(t => fixByTour[t.id] || []);
+      const playedFixes = seasonFixes.filter(f => f.played === 1);
+      seasonInfo = {
+        seasonNumber: sn,
+        status: active.status,
+        tournamentCount: seasonTours.length,
+        totalMatches: seasonFixes.length,
+        playedMatches: playedFixes.length,
+        totalGoals: playedFixes.reduce((sum, f) => sum + (f.home_score || 0) + (f.away_score || 0), 0),
+        totalSeasons: seasonsRes.rows.length,
+      };
+    }
 
-    // ── Last tournament champion (compute winner like GET /tournaments) ────
+    // ── Last Champion (most recent tournament with a winner) ─────────────
     let lastChampion = null;
-    try {
-      for (const t of tourRes.rows) {
-        let winner = null;
-        if (t.type === 'league') {
-          const table = await computeTable(t.id);
-          if (table.length > 0 && table[0].mp > 0) {
-            const allDone = await db.execute({ sql: 'SELECT COUNT(*) as c FROM fixtures WHERE tournament_id=? AND fixture_type=? AND played=0', args: [t.id, 'league'] });
-            if (allDone.rows[0].c === 0) winner = table[0].name;
-          }
-        } else if (t.type === 'knockout') {
-          const roundsRes2 = await db.execute({ sql: 'SELECT MAX(round) as r FROM fixtures WHERE tournament_id=? AND fixture_type=?', args: [t.id, 'knockout'] });
-          const maxRound2 = roundsRes2.rows[0]?.r;
-          if (maxRound2) {
-            const finalFix = await db.execute({ sql: 'SELECT * FROM fixtures WHERE tournament_id=? AND fixture_type=? AND round=? ORDER BY leg', args: [t.id, 'knockout', maxRound2] });
-            const leg1 = finalFix.rows.find(f => f.leg === 1);
-            const leg2 = finalFix.rows.find(f => f.leg === 2);
-            const winnerId = knockoutWinner(leg1, leg2);
-            if (winnerId) { const tr = await db.execute({ sql: 'SELECT name FROM teams WHERE id=?', args: [winnerId] }); if (tr.rows.length) winner = tr.rows[0].name; }
-          }
-        } else if (t.type === 'group_knockout') {
-          const ff = await db.execute({ sql: 'SELECT * FROM fixtures WHERE tournament_id=? AND fixture_type=? ORDER BY round DESC, match_number, leg LIMIT 2', args: [t.id, 'knockout'] });
-          if (ff.rows.length > 0) {
-            const mr = ff.rows[0].round;
-            const rr = await db.execute({ sql: 'SELECT * FROM knockout_rounds WHERE tournament_id=? AND round=?', args: [t.id, mr] });
-            if (rr.rows.length > 0 && rr.rows[0].round_name === 'Final') {
-              const fl = ff.rows.find(f => f.leg === 1);
-              if (fl && fl.played) {
-                const wid = fl.home_score > fl.away_score ? fl.home_team_id : fl.away_score > fl.home_score ? fl.away_team_id : null;
-                if (wid) { const tr = await db.execute({ sql: 'SELECT name FROM teams WHERE id=?', args: [wid] }); if (tr.rows.length) winner = tr.rows[0].name; }
-              }
-            }
-          }
-        }
-        if (winner) {
-          lastChampion = { winner, tournamentName: t.name, tournamentType: t.type, seasonNumber: t.season_number };
-          break; // tourRes is sorted DESC, so first match = most recent
-        }
+    for (const t of tourRes.rows) {
+      const result = computeWinner(t);
+      if (result?.champion) {
+        lastChampion = { winner: result.champion, tournamentName: t.name, tournamentType: t.type, seasonNumber: t.season_number };
+        break;
       }
-    } catch (_) {}
+    }
 
-    // ── Season quick stats (top scorer, top elo, top performer) ───────────
-    let seasonTopScorer = null;
-    let seasonTopElo = null;
-    let seasonTopPerformer = null;
-    try {
-      if (seasonInfo) {
-        const sn = seasonInfo.seasonNumber;
+    // ── Season Quick Stats ───────────────────────────────────────────────
+    let seasonTopScorer = null, seasonTopElo = null, seasonTopPerformer = null;
+    if (seasonInfo) {
+      const sn = seasonInfo.seasonNumber;
+      const seasonTours = tourRes.rows.filter(t => t.season_number === sn);
+      const seasonPlayed = seasonTours.flatMap(t => (fixByTour[t.id] || []).filter(f => f.played === 1));
 
-        // Top scorer
-        const scorerRes = await db.execute({
-          sql: `SELECT tm.name, SUM(
-                  CASE WHEN f.home_team_id=tm.id THEN f.home_score ELSE 0 END +
-                  CASE WHEN f.away_team_id=tm.id THEN f.away_score ELSE 0 END
-                ) as goals
-           FROM teams tm JOIN fixtures f ON (f.home_team_id=tm.id OR f.away_team_id=tm.id)
-           JOIN tournaments t ON tm.tournament_id=t.id
-           WHERE t.code=? AND t.season_number=? AND f.played=1
-           GROUP BY tm.name ORDER BY goals DESC LIMIT 1`,
-          args: [req.user.code, sn]
-        });
-        if (scorerRes.rows.length > 0 && scorerRes.rows[0].goals > 0) {
-          seasonTopScorer = { team: scorerRes.rows[0].name, goals: Number(scorerRes.rows[0].goals) };
-        }
-
-        // Top ELO — compute from season fixtures (same logic as /api/elo-ratings)
-        try {
-          const seasonTourIds = tourRes.rows.filter(t => t.season_number === sn).map(t => t.id);
-          if (seasonTourIds.length > 0) {
-            const ph = seasonTourIds.map(() => '?').join(',');
-            const eloFixRes = await db.execute({
-              sql: `SELECT f.* FROM fixtures f WHERE f.tournament_id IN (${ph}) AND f.played=1 ORDER BY f.rowid`,
-              args: seasonTourIds
-            });
-            const eloRatings = {};
-            const K = 32;
-            for (const f of eloFixRes.rows) {
-              const hN = teamById[f.home_team_id]?.name;
-              const aN = teamById[f.away_team_id]?.name;
-              if (!hN || !aN) continue;
-              if (!eloRatings[hN]) eloRatings[hN] = 1200;
-              if (!eloRatings[aN]) eloRatings[aN] = 1200;
-              const eH = 1 / (1 + Math.pow(10, (eloRatings[aN] - eloRatings[hN]) / 400));
-              const eA = 1 / (1 + Math.pow(10, (eloRatings[hN] - eloRatings[aN]) / 400));
-              const aH = f.home_score > f.away_score ? 1 : f.home_score < f.away_score ? 0 : 0.5;
-              const aA = 1 - aH;
-              const gd = Math.abs(f.home_score - f.away_score);
-              const mult = gd <= 1 ? 1 : gd === 2 ? 1.5 : (1.5 + (gd - 2) * 0.25);
-              const koB = f.fixture_type === 'knockout' ? 1.3 : 1;
-              eloRatings[hN] += Math.round(K * mult * koB * (aH - eH));
-              eloRatings[aN] += Math.round(K * mult * koB * (aA - eA));
-            }
-            const topElo = Object.entries(eloRatings).sort((a, b) => b[1] - a[1]);
-            if (topElo.length > 0) {
-              seasonTopElo = { team: topElo[0][0], elo: topElo[0][1] };
-            }
-          }
-        } catch (_) {}
-
-        // Top performer (most golds+silvers in the season)
-        // We compute it the same way as /api/stats: count tournament wins and runner-ups
-        try {
-          const seasonTours = tourRes.rows.filter(t => t.season_number === sn);
-          const perfMap = {};
-          for (const t of seasonTours) {
-            let champion = null, runnerUp = null;
-            if (t.type === 'league') {
-              const table = await computeTable(t.id);
-              if (table.length > 0 && table[0].mp > 0) {
-                const allDone = await db.execute({ sql: 'SELECT COUNT(*) as c FROM fixtures WHERE tournament_id=? AND fixture_type=? AND played=0', args: [t.id, 'league'] });
-                if (allDone.rows[0].c === 0) { champion = table[0].name; runnerUp = table[1]?.name; }
-              }
-            } else if (t.type === 'knockout') {
-              const rr = await db.execute({ sql: 'SELECT MAX(round) as r FROM fixtures WHERE tournament_id=? AND fixture_type=?', args: [t.id, 'knockout'] });
-              if (rr.rows[0]?.r) {
-                const ff = await db.execute({ sql: 'SELECT * FROM fixtures WHERE tournament_id=? AND fixture_type=? AND round=? ORDER BY leg', args: [t.id, 'knockout', rr.rows[0].r] });
-                const l1 = ff.rows.find(f => f.leg === 1), l2 = ff.rows.find(f => f.leg === 2);
-                const wid = knockoutWinner(l1, l2);
-                if (wid) {
-                  const lid = wid === l1?.home_team_id ? l1?.away_team_id : l1?.home_team_id;
-                  champion = teamById[wid]?.name; runnerUp = lid ? teamById[lid]?.name : null;
-                }
-              }
-            } else if (t.type === 'group_knockout') {
-              const ff = await db.execute({ sql: 'SELECT * FROM fixtures WHERE tournament_id=? AND fixture_type=? ORDER BY round DESC, match_number, leg LIMIT 2', args: [t.id, 'knockout'] });
-              if (ff.rows.length > 0) {
-                const mr = ff.rows[0].round;
-                const rr = await db.execute({ sql: 'SELECT * FROM knockout_rounds WHERE tournament_id=? AND round=?', args: [t.id, mr] });
-                if (rr.rows.length > 0 && rr.rows[0].round_name === 'Final') {
-                  const fl = ff.rows.find(f => f.leg === 1);
-                  if (fl && fl.played) {
-                    const wid = fl.home_score > fl.away_score ? fl.home_team_id : fl.away_score > fl.home_score ? fl.away_team_id : null;
-                    const lid = wid === fl.home_team_id ? fl.away_team_id : fl.home_team_id;
-                    if (wid) champion = teamById[wid]?.name;
-                    if (lid) runnerUp = teamById[lid]?.name;
-                  }
-                }
-              }
-            }
-            if (champion) { perfMap[champion] = perfMap[champion] || { gold: 0, silver: 0 }; perfMap[champion].gold++; }
-            if (runnerUp) { perfMap[runnerUp] = perfMap[runnerUp] || { gold: 0, silver: 0 }; perfMap[runnerUp].silver++; }
-          }
-          const sorted = Object.entries(perfMap)
-            .map(([name, m]) => ({ name, gold: m.gold, silver: m.silver, score: m.gold * 3 + m.silver }))
-            .sort((a, b) => b.score - a.score || b.gold - a.gold);
-          if (sorted.length > 0 && sorted[0].score > 0) {
-            seasonTopPerformer = { team: sorted[0].name, gold: sorted[0].gold, silver: sorted[0].silver };
-          }
-        } catch (_) {}
+      // Top scorer — from in-memory fixtures
+      const goalMap = {};
+      for (const f of seasonPlayed) {
+        const hN = teamById[f.home_team_id]?.name, aN = teamById[f.away_team_id]?.name;
+        if (hN) goalMap[hN] = (goalMap[hN] || 0) + (f.home_score || 0);
+        if (aN) goalMap[aN] = (goalMap[aN] || 0) + (f.away_score || 0);
       }
-    } catch (_) {}
+      const topGoal = Object.entries(goalMap).sort((a, b) => b[1] - a[1]);
+      if (topGoal.length > 0 && topGoal[0][1] > 0) {
+        seasonTopScorer = { team: topGoal[0][0], goals: topGoal[0][1] };
+      }
+
+      // Top ELO — from in-memory fixtures
+      const eloRatings = {};
+      const K = 32;
+      // Use chronological order (allFixtures is already sorted by rowid)
+      const seasonFixesChrono = seasonTours.flatMap(t => (fixByTour[t.id] || []).filter(f => f.played === 1));
+      for (const f of seasonFixesChrono) {
+        const hN = teamById[f.home_team_id]?.name, aN = teamById[f.away_team_id]?.name;
+        if (!hN || !aN) continue;
+        if (!eloRatings[hN]) eloRatings[hN] = 1200;
+        if (!eloRatings[aN]) eloRatings[aN] = 1200;
+        const eH = 1 / (1 + Math.pow(10, (eloRatings[aN] - eloRatings[hN]) / 400));
+        const eA = 1 / (1 + Math.pow(10, (eloRatings[hN] - eloRatings[aN]) / 400));
+        const aH = f.home_score > f.away_score ? 1 : f.home_score < f.away_score ? 0 : 0.5;
+        const gd = Math.abs(f.home_score - f.away_score);
+        const mult = gd <= 1 ? 1 : gd === 2 ? 1.5 : (1.5 + (gd - 2) * 0.25);
+        const koB = f.fixture_type === 'knockout' ? 1.3 : 1;
+        eloRatings[hN] += Math.round(K * mult * koB * (aH - eH));
+        eloRatings[aN] += Math.round(K * mult * koB * ((1 - aH) - eA));
+      }
+      const topElo = Object.entries(eloRatings).sort((a, b) => b[1] - a[1]);
+      if (topElo.length > 0 && topElo[0][1] !== 1200) {
+        seasonTopElo = { team: topElo[0][0], elo: topElo[0][1] };
+      }
+
+      // Top performer — reuse computeWinner
+      const perfMap = {};
+      for (const t of seasonTours) {
+        const result = computeWinner(t);
+        if (result?.champion) { perfMap[result.champion] = perfMap[result.champion] || { gold: 0, silver: 0 }; perfMap[result.champion].gold++; }
+        if (result?.runnerUp) { perfMap[result.runnerUp] = perfMap[result.runnerUp] || { gold: 0, silver: 0 }; perfMap[result.runnerUp].silver++; }
+      }
+      const sorted = Object.entries(perfMap)
+        .map(([name, m]) => ({ name, gold: m.gold, silver: m.silver, score: m.gold * 3 + m.silver }))
+        .sort((a, b) => b.score - a.score || b.gold - a.gold);
+      if (sorted.length > 0 && sorted[0].score > 0) {
+        seasonTopPerformer = { team: sorted[0].name, gold: sorted[0].gold, silver: sorted[0].silver };
+      }
+    }
 
     res.json({
       activeTournaments,
