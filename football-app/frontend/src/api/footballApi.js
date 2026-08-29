@@ -46,10 +46,16 @@ export const createGlobalTeam  = (data)       => axios.post(`${BASE}/global-team
 export const renameGlobalTeam  = (id, data)   => axios.put(`${BASE}/global-teams/${id}`, data);
 export const deleteGlobalTeam  = (id)         => axios.delete(`${BASE}/global-teams/${id}`);
 
+// Seasons
+export const getSeasons           = ()         => axios.get(`${BASE}/seasons`);
+export const createSeason         = ()         => axios.post(`${BASE}/seasons`);
+export const completeSeason       = (num)      => axios.post(`${BASE}/seasons/${num}/complete`);
+export const migrateToSeason1     = ()         => axios.post(`${BASE}/seasons/migrate-to-season1`);
+
 // Tournaments
-export const getTournaments    = ()     => axios.get(`${BASE}/tournaments`);
-export const createTournament  = (data) => axios.post(`${BASE}/tournaments`, data);
-export const deleteTournament  = (id)   => axios.delete(`${BASE}/tournaments/${id}`);
+export const getTournaments    = (season)   => axios.get(`${BASE}/tournaments${season !== undefined ? `?season=${season}` : ''}`);
+export const createTournament  = (data)     => axios.post(`${BASE}/tournaments`, data);
+export const deleteTournament  = (id)       => axios.delete(`${BASE}/tournaments/${id}`);
 
 // Teams
 export const getTeams   = (tId)          => axios.get(`${BASE}/tournaments/${tId}/teams`);
@@ -70,7 +76,7 @@ export const getKnockoutBracket = (tId)            => axios.get(`${BASE}/tournam
 export const getTable = (tId) => axios.get(`${BASE}/tournaments/${tId}/table`);
 
 // Cross-tournament Stats
-export const getStats = () => axios.get(`${BASE}/stats`);
+export const getStats = (season) => axios.get(`${BASE}/stats${season !== undefined ? `?season=${season}` : ''}`);
 
 // Group Knockout
 export const getGroupTables           = (tId) => axios.get(`${BASE}/tournaments/${tId}/group-tables`);
@@ -96,7 +102,7 @@ export const getSeasonSummary    = (tId)   => axios.get(`${BASE}/tournaments/${t
 export const getDashboard = () => axios.get(`${BASE}/dashboard`);
 
 // ELO Ratings
-export const getEloRatings = () => axios.get(`${BASE}/elo-ratings`);
+export const getEloRatings = (season) => axios.get(`${BASE}/elo-ratings${season !== undefined ? `?season=${season}` : ''}`);
 
 // Birthday Wishes
 export const getBirthdayWishes  = ()     => axios.get(`${BASE}/birthday`);

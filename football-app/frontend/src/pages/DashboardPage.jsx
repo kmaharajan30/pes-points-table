@@ -13,6 +13,8 @@ import EmojiEventsRoundedIcon from '@mui/icons-material/EmojiEventsRounded';
 import CakeRoundedIcon from '@mui/icons-material/CakeRounded';
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
 import DeleteRoundedIcon from '@mui/icons-material/DeleteRounded';
+import CalendarTodayRoundedIcon from '@mui/icons-material/CalendarTodayRounded';
+import BoltRoundedIcon from '@mui/icons-material/BoltRounded';
 import PageHeader from '../components/PageHeader';
 import { getDashboard, getBirthdayWishes, createBirthdayWish, deleteBirthdayWish } from '../api/footballApi';
 
@@ -49,6 +51,16 @@ const slideUp = keyframes`
 const lightSweep = keyframes`
   0% { transform: translateX(-100%) rotate(25deg); }
   100% { transform: translateX(200%) rotate(25deg); }
+`;
+
+const trophyFloat = keyframes`
+  0%, 100% { transform: translateY(0) rotate(-2deg); }
+  50%      { transform: translateY(-6px) rotate(2deg); }
+`;
+
+const countUp = keyframes`
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
 `;
 
 const COLORS = ['#00e676','#651fff','#ff5252','#ffd740','#40c4ff','#ff6e40','#b2ff59','#e040fb','#64ffda','#ff4081'];
@@ -209,6 +221,240 @@ function BirthdayBanner({ wishes, isAdmin, onDelete }) {
           </CardContent>
         </Card>
       ))}
+    </Box>
+  );
+}
+
+// ─── Season Hub Card ──────────────────────────────────────────────────────────
+function SeasonHubCard({ seasonInfo, lastChampion, seasonTopScorer, seasonTopElo, seasonTopPerformer }) {
+  if (!seasonInfo && !lastChampion) return null;
+
+  return (
+    <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2, mb: 2.5 }}>
+      {/* Active Season Overview */}
+      {seasonInfo && (
+        <Card sx={{
+          flex: 1, position: 'relative', overflow: 'hidden',
+          background: 'linear-gradient(135deg, #0d1b2a 0%, #1b2838 50%, #0d1b2a 100%)',
+          border: '1px solid rgba(0,230,118,0.15)',
+          borderRadius: 3,
+        }}>
+          {/* Animated accent line */}
+          <Box sx={{
+            position: 'absolute', top: 0, left: 0, right: 0, height: 3,
+            background: 'linear-gradient(90deg, #00e676, #651fff, #00e676)',
+            backgroundSize: '200% 100%',
+            animation: `${shimmer} 3s linear infinite`,
+          }} />
+          <CardContent sx={{ p: { xs: 2, sm: 2.5 }, position: 'relative' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+              <CalendarTodayRoundedIcon sx={{ color: '#00e676', fontSize: 18 }} />
+              <Typography sx={{ fontWeight: 800, fontSize: 14 }}>
+                Season {seasonInfo.seasonNumber}
+              </Typography>
+              <Chip
+                label={seasonInfo.status === 'active' ? 'Live' : 'Completed'}
+                size="small"
+                sx={{
+                  height: 18, fontSize: 9, fontWeight: 800,
+                  bgcolor: seasonInfo.status === 'active' ? 'rgba(0,230,118,0.15)' : 'rgba(255,152,0,0.12)',
+                  color: seasonInfo.status === 'active' ? '#00e676' : '#ff9800',
+                  letterSpacing: 0.5,
+                }}
+              />
+            </Box>
+
+            {/* Stats grid */}
+            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 1.5 }}>
+              <StatBox
+                value={seasonInfo.tournamentCount}
+                label="Tournaments"
+                color="#40c4ff"
+                delay="0s"
+              />
+              <StatBox
+                value={seasonInfo.playedMatches}
+                label="Matches"
+                color="#a255ff"
+                delay="0.1s"
+              />
+              <StatBox
+                value={seasonInfo.totalGoals}
+                label="Goals"
+                color="#ff6e40"
+                delay="0.2s"
+              />
+            </Box>
+
+            {/* Season progress bar */}
+            {seasonInfo.totalMatches > 0 && (
+              <Box sx={{ mt: 2 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                  <Typography sx={{ fontSize: 10, color: 'text.secondary', fontWeight: 600 }}>Season Progress</Typography>
+                  <Typography sx={{ fontSize: 10, color: '#00e676', fontWeight: 700 }}>
+                    {Math.round((seasonInfo.playedMatches / seasonInfo.totalMatches) * 100)}%
+                  </Typography>
+                </Box>
+                <Box sx={{ height: 4, borderRadius: 2, bgcolor: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+                  <Box sx={{
+                    height: '100%', borderRadius: 2,
+                    width: `${Math.min(100, (seasonInfo.playedMatches / seasonInfo.totalMatches) * 100)}%`,
+                    background: 'linear-gradient(90deg, #00e676, #651fff)',
+                    transition: 'width 1s ease',
+                  }} />
+                </Box>
+              </Box>
+            )}
+
+            {/* Season top scorer */}
+            {seasonTopScorer && (
+              <Box sx={{
+                mt: 2, p: 1.25, borderRadius: 2,
+                background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)',
+                display: 'flex', alignItems: 'center', gap: 1.5,
+              }}>
+                <BoltRoundedIcon sx={{ fontSize: 16, color: '#ffd740' }} />
+                <Box sx={{ flex: 1 }}>
+                  <Typography sx={{ fontSize: 10, color: 'text.secondary', fontWeight: 600 }}>Top Scorer</Typography>
+                  <Typography sx={{ fontSize: 12, fontWeight: 800, color: '#ffd740' }}>{seasonTopScorer.team}</Typography>
+                </Box>
+                <Chip label={`⚽ ${seasonTopScorer.goals}`} size="small"
+                  sx={{ fontSize: 10, fontWeight: 700, height: 20, bgcolor: 'rgba(255,215,64,0.12)', color: '#ffd740' }} />
+              </Box>
+            )}
+
+            {/* Season highlights row */}
+            {(seasonTopScorer || seasonTopElo || seasonTopPerformer) && (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: seasonTopScorer ? 0 : 2 }}>
+                {/* Top Performer */}
+                {seasonTopPerformer && (
+                  <Box sx={{
+                    mt: seasonTopScorer ? 1 : 0, p: 1.25, borderRadius: 2,
+                    background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)',
+                    display: 'flex', alignItems: 'center', gap: 1.5,
+                  }}>
+                    <EmojiEventsRoundedIcon sx={{ fontSize: 16, color: '#a255ff' }} />
+                    <Box sx={{ flex: 1 }}>
+                      <Typography sx={{ fontSize: 10, color: 'text.secondary', fontWeight: 600 }}>Top Performer</Typography>
+                      <Typography sx={{ fontSize: 12, fontWeight: 800, color: '#a255ff' }}>{seasonTopPerformer.team}</Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', gap: 0.5 }}>
+                      {seasonTopPerformer.gold > 0 && (
+                        <Chip label={`🥇 ${seasonTopPerformer.gold}`} size="small"
+                          sx={{ fontSize: 10, fontWeight: 700, height: 20, bgcolor: 'rgba(255,215,0,0.12)', color: '#ffd700' }} />
+                      )}
+                      {seasonTopPerformer.silver > 0 && (
+                        <Chip label={`🥈 ${seasonTopPerformer.silver}`} size="small"
+                          sx={{ fontSize: 10, fontWeight: 700, height: 20, bgcolor: 'rgba(192,192,192,0.12)', color: '#c0c0c0' }} />
+                      )}
+                    </Box>
+                  </Box>
+                )}
+
+                {/* Top Power Rating */}
+                {seasonTopElo && (
+                  <Box sx={{
+                    p: 1.25, borderRadius: 2,
+                    background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)',
+                    display: 'flex', alignItems: 'center', gap: 1.5,
+                  }}>
+                    <BoltRoundedIcon sx={{ fontSize: 16, color: '#ff9800' }} />
+                    <Box sx={{ flex: 1 }}>
+                      <Typography sx={{ fontSize: 10, color: 'text.secondary', fontWeight: 600 }}>Top Power Rating</Typography>
+                      <Typography sx={{ fontSize: 12, fontWeight: 800, color: '#ff9800' }}>{seasonTopElo.team}</Typography>
+                    </Box>
+                    <Chip label={`⚡ ${seasonTopElo.elo}`} size="small"
+                      sx={{ fontSize: 10, fontWeight: 700, height: 20, bgcolor: 'rgba(255,152,0,0.12)', color: '#ff9800' }} />
+                  </Box>
+                )}
+              </Box>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Last Champion Trophy Card */}
+      {lastChampion && (
+        <Card sx={{
+          flex: { xs: '1', md: '0 0 280px' }, position: 'relative', overflow: 'hidden',
+          background: 'linear-gradient(160deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
+          border: '1px solid rgba(255,215,0,0.2)',
+          borderRadius: 3,
+        }}>
+          {/* Gold shimmer overlay */}
+          <Box sx={{
+            position: 'absolute', inset: 0, pointerEvents: 'none',
+            background: 'linear-gradient(90deg, transparent, rgba(255,215,0,0.05) 30%, rgba(255,255,255,0.03) 50%, rgba(255,215,0,0.05) 70%, transparent)',
+            backgroundSize: '200% 100%',
+            animation: `${shimmer} 4s ease-in-out infinite`,
+          }} />
+          {/* Stars */}
+          <Box sx={{ position: 'absolute', top: 12, left: 16, fontSize: 8, color: 'rgba(255,215,0,0.4)', animation: `${pulse} 2s ease-in-out infinite` }}>✦</Box>
+          <Box sx={{ position: 'absolute', top: 24, right: 20, fontSize: 6, color: 'rgba(255,215,0,0.3)', animation: `${pulse} 2.5s ease-in-out infinite`, animationDelay: '0.5s' }}>✦</Box>
+          <Box sx={{ position: 'absolute', bottom: 20, left: 24, fontSize: 7, color: 'rgba(255,215,0,0.35)', animation: `${pulse} 3s ease-in-out infinite`, animationDelay: '1s' }}>✦</Box>
+
+          <CardContent sx={{
+            p: { xs: 2.5, sm: 3 }, position: 'relative',
+            display: 'flex', flexDirection: 'column', alignItems: 'center',
+            textAlign: 'center', height: '100%', justifyContent: 'center',
+          }}>
+            <Typography sx={{ fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'rgba(255,215,0,0.6)', mb: 1 }}>
+              Reigning Champion
+            </Typography>
+
+            {/* Trophy */}
+            <Box sx={{ animation: `${trophyFloat} 3s ease-in-out infinite`, mb: 1 }}>
+              <Typography sx={{ fontSize: 40, filter: 'drop-shadow(0 4px 12px rgba(255,215,0,0.4))' }}>🏆</Typography>
+            </Box>
+
+            {/* Winner name */}
+            <Typography sx={{
+              fontWeight: 900, fontSize: { xs: 18, sm: 22 },
+              background: 'linear-gradient(180deg, #fff8dc 0%, #ffd700 50%, #daa520 100%)',
+              WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+              mb: 0.75, lineHeight: 1.2,
+            }}>
+              {lastChampion.winner}
+            </Typography>
+
+            {/* Tournament name */}
+            <Typography sx={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', fontWeight: 600, mb: 0.5 }}>
+              {lastChampion.tournamentName}
+            </Typography>
+
+            {/* Season badge */}
+            {lastChampion.seasonNumber && (
+              <Chip
+                label={`Season ${lastChampion.seasonNumber}`}
+                size="small"
+                sx={{
+                  height: 18, fontSize: 9, fontWeight: 700,
+                  bgcolor: 'rgba(255,215,0,0.1)', color: 'rgba(255,215,0,0.7)',
+                  border: '1px solid rgba(255,215,0,0.2)',
+                }}
+              />
+            )}
+          </CardContent>
+        </Card>
+      )}
+    </Box>
+  );
+}
+
+function StatBox({ value, label, color, delay }) {
+  return (
+    <Box sx={{
+      p: 1.25, borderRadius: 2, textAlign: 'center',
+      background: `linear-gradient(135deg, ${color}08, ${color}03)`,
+      border: `1px solid ${color}18`,
+      animation: `${countUp} 0.4s ease-out ${delay} both`,
+    }}>
+      <Typography sx={{ fontWeight: 900, fontSize: 22, color, lineHeight: 1.1, mb: 0.25 }}>
+        {value}
+      </Typography>
+      <Typography sx={{ fontSize: 9, color: 'text.secondary', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+        {label}
+      </Typography>
     </Box>
   );
 }
@@ -389,6 +635,15 @@ export default function DashboardPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Season Hub & Last Champion */}
+      <SeasonHubCard
+        seasonInfo={data.seasonInfo}
+        lastChampion={data.lastChampion}
+        seasonTopScorer={data.seasonTopScorer}
+        seasonTopElo={data.seasonTopElo}
+        seasonTopPerformer={data.seasonTopPerformer}
+      />
 
       {/* Win Streaks */}
       {data.streaks.length > 0 && (

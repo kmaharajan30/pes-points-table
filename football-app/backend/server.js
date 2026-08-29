@@ -318,7 +318,17 @@ app.get('/api/presence/:code', requireAuth, (req, res) => {
 // ─── Tournaments ──────────────────────────────────────────────────────────────
 app.get('/api/tournaments', requireAuth, async (req, res) => {
   try {
-    const result = await db.execute({ sql: 'SELECT * FROM tournaments WHERE code=? ORDER BY created_at DESC', args: [req.user.code] });
+    // Support optional ?season=N filter (season number)
+    const seasonFilter = req.query.season !== undefined ? parseInt(req.query.season) : null;
+    let sql, args;
+    if (seasonFilter !== null && Number.isFinite(seasonFilter)) {
+      sql = 'SELECT * FROM tournaments WHERE code=? AND season_number=? ORDER BY created_at DESC';
+      args = [req.user.code, seasonFilter];
+    } else {
+      sql = 'SELECT * FROM tournaments WHERE code=? ORDER BY created_at DESC';
+      args = [req.user.code];
+    }
+    const result = await db.execute({ sql, args });
     const tournaments = await Promise.all(result.rows.map(async (r) => {
       let winner = null;
       try {
@@ -367,7 +377,7 @@ app.get('/api/tournaments', requireAuth, async (req, res) => {
           }
         }
       } catch(_) {}
-      return { id:r.id, name:r.name, season:r.season, type:r.type, numGroups:r.num_groups, legs:r.legs, createdAt:r.created_at, winner };
+      return { id:r.id, name:r.name, season:r.season, type:r.type, numGroups:r.num_groups, legs:r.legs, createdAt:r.created_at, winner, seasonNumber: r.season_number };
     }));
     res.json(tournaments);
   } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
@@ -375,16 +385,40 @@ app.get('/api/tournaments', requireAuth, async (req, res) => {
 
 app.post('/api/tournaments', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { name, season, type='league', num_groups=2, legs=2, teamIds=[] } = req.body;
+    const { name, season, type='league', num_groups=2, legs=2, teamIds=[], season_number } = req.body;
     if (!name) return res.status(400).json({ error: 'Name required' });
     if (!['league','knockout','group_knockout'].includes(type)) return res.status(400).json({ error: 'type must be league, knockout, or group_knockout' });
     // Prevent duplicate tournament names (case-insensitive) within same group
     const dupCheck = await db.execute({ sql: 'SELECT id FROM tournaments WHERE code=? AND LOWER(name)=LOWER(?)', args: [req.user.code, name.trim()] });
     if (dupCheck.rows.length > 0) return res.status(400).json({ error: 'Tournament with this name already exists' });
+
+    // Season validation
+    let resolvedSeasonNumber = null;
+    if (season_number !== undefined && season_number !== null) {
+      const seasonNum = parseInt(season_number);
+      if (!Number.isFinite(seasonNum)) return res.status(400).json({ error: 'Invalid season_number' });
+      // Verify the season exists and is active
+      const seasonRes = await db.execute({
+        sql: 'SELECT * FROM seasons WHERE code=? AND season_number=?',
+        args: [req.user.code, seasonNum]
+      });
+      if (seasonRes.rows.length === 0) return res.status(400).json({ error: `Season ${seasonNum} does not exist` });
+      if (seasonRes.rows[0].status !== 'active') return res.status(400).json({ error: `Season ${seasonNum} is completed. Start a new season first.` });
+      // Enforce max 10 tournaments per season
+      const countRes = await db.execute({
+        sql: 'SELECT COUNT(*) as c FROM tournaments WHERE code=? AND season_number=?',
+        args: [req.user.code, seasonNum]
+      });
+      if (Number(countRes.rows[0].c) >= 10) {
+        return res.status(400).json({ error: `Season ${seasonNum} already has 10 tournaments (maximum). Complete this season and start Season ${seasonNum + 1}.` });
+      }
+      resolvedSeasonNumber = seasonNum;
+    }
+
     const numGroups = type === 'group_knockout' ? Math.max(2, parseInt(num_groups)||2) : null;
     const numLegs   = type === 'group_knockout' ? (parseInt(legs)===1 ? 1 : 2) : (type === 'league' ? (parseInt(legs)===1 ? 1 : 2) : null);
-    const t = { id:uuidv4(), code:req.user.code, name:name.trim(), season:season||'', type, num_groups:numGroups, legs:numLegs, created_at:new Date().toISOString() };
-    await db.execute({ sql: 'INSERT INTO tournaments (id,code,name,season,type,num_groups,legs,created_at) VALUES (?,?,?,?,?,?,?,?)', args: [t.id,t.code,t.name,t.season,t.type,t.num_groups,t.legs,t.created_at] });
+    const t = { id:uuidv4(), code:req.user.code, name:name.trim(), season:season||'', type, num_groups:numGroups, legs:numLegs, created_at:new Date().toISOString(), season_number: resolvedSeasonNumber };
+    await db.execute({ sql: 'INSERT INTO tournaments (id,code,name,season,type,num_groups,legs,created_at,season_number) VALUES (?,?,?,?,?,?,?,?,?)', args: [t.id,t.code,t.name,t.season,t.type,t.num_groups,t.legs,t.created_at,t.season_number] });
 
     // If global team IDs provided, copy them into this tournament
     if (Array.isArray(teamIds) && teamIds.length > 0) {
@@ -398,7 +432,7 @@ app.post('/api/tournaments', requireAuth, requireAdmin, async (req, res) => {
       }
     }
 
-    res.status(201).json({ id:t.id, name:t.name, season:t.season, type:t.type, numGroups:t.num_groups, legs:t.legs, createdAt:t.created_at });
+    res.status(201).json({ id:t.id, name:t.name, season:t.season, type:t.type, numGroups:t.num_groups, legs:t.legs, createdAt:t.created_at, seasonNumber: t.season_number });
   } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
 });
 
@@ -1173,8 +1207,20 @@ app.get('/api/stats', requireAuth, async (req, res) => {
   try {
     const code = req.user.code;
 
-    // Get all tournaments for this code
-    const tournamentsRes = await db.execute({ sql: 'SELECT * FROM tournaments WHERE code=? ORDER BY created_at DESC', args: [code] });
+    // Support ?season=N for season-based filtering (omit or 'overall' for all-time)
+    const seasonFilter = req.query.season !== undefined && req.query.season !== 'overall'
+      ? parseInt(req.query.season) : null;
+
+    // Get all tournaments for this code (optionally filtered by season)
+    let tourSql, tourArgs;
+    if (seasonFilter !== null && Number.isFinite(seasonFilter)) {
+      tourSql = 'SELECT * FROM tournaments WHERE code=? AND season_number=? ORDER BY created_at DESC';
+      tourArgs = [code, seasonFilter];
+    } else {
+      tourSql = 'SELECT * FROM tournaments WHERE code=? ORDER BY created_at DESC';
+      tourArgs = [code];
+    }
+    const tournamentsRes = await db.execute({ sql: tourSql, args: tourArgs });
     const tournaments = tournamentsRes.rows;
 
     if (tournaments.length === 0) {
@@ -1600,8 +1646,19 @@ app.get('/api/team-rivals/:teamName1/:teamName2', requireAuth, async (req, res) 
 // ─── ELO Power Ratings ────────────────────────────────────────────────────────
 app.get('/api/elo-ratings', requireAuth, async (req, res) => {
   try {
-    // Get all played fixtures across all tournaments for this user's group
-    const tourRes = await db.execute({ sql: 'SELECT id FROM tournaments WHERE code=?', args: [req.user.code] });
+    // Support ?season=N for season-based filtering (omit or 'overall' for all-time)
+    const seasonFilter = req.query.season !== undefined && req.query.season !== 'overall'
+      ? parseInt(req.query.season) : null;
+
+    let tourSql, tourArgs;
+    if (seasonFilter !== null && Number.isFinite(seasonFilter)) {
+      tourSql = 'SELECT id FROM tournaments WHERE code=? AND season_number=?';
+      tourArgs = [req.user.code, seasonFilter];
+    } else {
+      tourSql = 'SELECT id FROM tournaments WHERE code=?';
+      tourArgs = [req.user.code];
+    }
+    const tourRes = await db.execute({ sql: tourSql, args: tourArgs });
     if (tourRes.rows.length === 0) return res.json({ ratings: [], history: [] });
 
     const tournamentIds = tourRes.rows.map(t => t.id);
@@ -1722,37 +1779,50 @@ app.delete('/api/birthday/:id', requireAuth, requireAdmin, async (req, res) => {
 // ─── Dashboard / Season Overview ──────────────────────────────────────────────
 app.get('/api/dashboard', requireAuth, async (req, res) => {
   try {
-    const tourRes = await db.execute({ sql: 'SELECT * FROM tournaments WHERE code=? ORDER BY created_at DESC', args: [req.user.code] });
-    if (tourRes.rows.length === 0) return res.json({ activeTournaments: [], recentResults: [], upcomingFixtures: [], leagueLeaders: [], streaks: [] });
+    const code = req.user.code;
+    const tourRes = await db.execute({ sql: 'SELECT * FROM tournaments WHERE code=? ORDER BY created_at DESC', args: [code] });
+    if (tourRes.rows.length === 0) return res.json({ activeTournaments: [], recentResults: [], upcomingFixtures: [], leagueLeaders: [], streaks: [], seasonInfo: null, lastChampion: null, seasonTopScorer: null, seasonTopElo: null, seasonTopPerformer: null });
 
     const tournamentIds = tourRes.rows.map(t => t.id);
     const placeholders = tournamentIds.map(() => '?').join(',');
 
-    // Recent results (last 5 played matches, ordered by when result was entered)
-    const recentRes = await db.execute({
-      sql: `SELECT f.*, t.name as tournament_name FROM fixtures f
-            JOIN tournaments t ON f.tournament_id = t.id
-            WHERE f.tournament_id IN (${placeholders}) AND f.played = 1
-            ORDER BY COALESCE(f.played_at, '') DESC, f.rowid DESC LIMIT 5`,
-      args: [...tournamentIds]
-    });
+    // ── Batch load ALL data in parallel ──────────────────────────────────
+    const [recentRes, upcomingRes, teamsRes, allFixRes, knockoutRoundsRes, seasonsRes] = await Promise.all([
+      db.execute({
+        sql: `SELECT f.*, t.name as tournament_name FROM fixtures f
+              JOIN tournaments t ON f.tournament_id = t.id
+              WHERE f.tournament_id IN (${placeholders}) AND f.played = 1
+              ORDER BY COALESCE(f.played_at, '') DESC, f.rowid DESC LIMIT 5`,
+        args: [...tournamentIds]
+      }),
+      db.execute({
+        sql: `SELECT f.*, t.name as tournament_name FROM fixtures f
+              JOIN tournaments t ON f.tournament_id = t.id
+              WHERE f.tournament_id IN (${placeholders}) AND f.played = 0
+              AND f.home_team_id IS NOT NULL AND f.away_team_id IS NOT NULL
+              ORDER BY f.rowid LIMIT 5`,
+        args: [...tournamentIds]
+      }),
+      db.execute({ sql: `SELECT * FROM teams WHERE tournament_id IN (${placeholders})`, args: [...tournamentIds] }),
+      db.execute({ sql: `SELECT * FROM fixtures WHERE tournament_id IN (${placeholders}) ORDER BY rowid`, args: [...tournamentIds] }),
+      db.execute({ sql: `SELECT * FROM knockout_rounds WHERE tournament_id IN (${placeholders})`, args: [...tournamentIds] }),
+      db.execute({ sql: 'SELECT * FROM seasons WHERE code=? ORDER BY season_number DESC', args: [code] }),
+    ]);
 
-    // Upcoming fixtures (next 5 unplayed with teams assigned)
-    const upcomingRes = await db.execute({
-      sql: `SELECT f.*, t.name as tournament_name FROM fixtures f
-            JOIN tournaments t ON f.tournament_id = t.id
-            WHERE f.tournament_id IN (${placeholders}) AND f.played = 0
-            AND f.home_team_id IS NOT NULL AND f.away_team_id IS NOT NULL
-            ORDER BY f.rowid LIMIT 5`,
-      args: [...tournamentIds]
-    });
-
-    // Get all teams for name lookup
-    const teamsRes = await db.execute({
-      sql: `SELECT * FROM teams WHERE tournament_id IN (${placeholders})`,
-      args: [...tournamentIds]
-    });
     const teamById = Object.fromEntries(teamsRes.rows.map(t => [t.id, t]));
+    const allFixtures = allFixRes.rows;
+
+    // Group fixtures by tournament for fast lookups
+    const fixByTour = {};
+    for (const f of allFixtures) {
+      if (!fixByTour[f.tournament_id]) fixByTour[f.tournament_id] = [];
+      fixByTour[f.tournament_id].push(f);
+    }
+    const koRoundsByTour = {};
+    for (const r of knockoutRoundsRes.rows) {
+      if (!koRoundsByTour[r.tournament_id]) koRoundsByTour[r.tournament_id] = [];
+      koRoundsByTour[r.tournament_id].push(r);
+    }
 
     const mapFixture = (f) => ({
       id: f.id, tournamentId: f.tournament_id, tournamentName: f.tournament_name,
@@ -1763,69 +1833,214 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
       round: f.round, leg: f.leg
     });
 
-    // League leaders (top of each active league tournament)
+    // ── Helper: compute table from in-memory fixtures ────────────────────
+    const computeTableFromFixtures = (tourId) => {
+      const tTeams = teamsRes.rows.filter(t => t.tournament_id === tourId);
+      const tFix = (fixByTour[tourId] || []).filter(f => f.fixture_type === 'league' && f.played === 1);
+      const table = {};
+      for (const t of tTeams) {
+        table[t.id] = { name: t.name, mp: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, gd: 0, pts: 0 };
+      }
+      for (const f of tFix) {
+        const h = table[f.home_team_id], a = table[f.away_team_id];
+        if (!h || !a) continue;
+        h.mp++; a.mp++;
+        h.gf += f.home_score; h.ga += f.away_score;
+        a.gf += f.away_score; a.ga += f.home_score;
+        if (f.home_score > f.away_score) { h.w++; h.pts += 3; a.l++; }
+        else if (f.home_score < f.away_score) { a.w++; a.pts += 3; h.l++; }
+        else { h.d++; a.d++; h.pts++; a.pts++; }
+      }
+      return Object.values(table)
+        .map(t => ({ ...t, gd: t.gf - t.ga }))
+        .sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf)
+        .filter(t => t.mp > 0 || true); // include all
+    };
+
+    // ── Helper: compute winner for a tournament from in-memory data ──────
+    const computeWinner = (t) => {
+      const fixes = fixByTour[t.id] || [];
+      if (t.type === 'league') {
+        const table = computeTableFromFixtures(t.id);
+        if (table.length > 0 && table[0].mp > 0) {
+          const unplayed = fixes.filter(f => f.fixture_type === 'league' && f.played === 0).length;
+          if (unplayed === 0) return { champion: table[0].name, runnerUp: table[1]?.name || null };
+        }
+      } else if (t.type === 'knockout') {
+        const koFixes = fixes.filter(f => f.fixture_type === 'knockout');
+        if (koFixes.length > 0) {
+          const maxRound = Math.max(...koFixes.map(f => f.round));
+          const finalLegs = koFixes.filter(f => f.round === maxRound);
+          const leg1 = finalLegs.find(f => f.leg === 1);
+          const leg2 = finalLegs.find(f => f.leg === 2);
+          const winnerId = knockoutWinner(leg1, leg2);
+          if (winnerId) {
+            const loserId = winnerId === leg1?.home_team_id ? leg1?.away_team_id : leg1?.home_team_id;
+            return { champion: teamById[winnerId]?.name, runnerUp: loserId ? teamById[loserId]?.name : null };
+          }
+        }
+      } else if (t.type === 'group_knockout') {
+        const koFixes = fixes.filter(f => f.fixture_type === 'knockout');
+        if (koFixes.length > 0) {
+          const maxRound = Math.max(...koFixes.map(f => f.round));
+          const koRounds = koRoundsByTour[t.id] || [];
+          const isFinal = koRounds.some(r => r.round === maxRound && r.round_name === 'Final');
+          if (isFinal) {
+            const fl = koFixes.find(f => f.round === maxRound && f.leg === 1);
+            if (fl && fl.played) {
+              const wid = fl.home_score > fl.away_score ? fl.home_team_id : fl.away_score > fl.home_score ? fl.away_team_id : null;
+              const lid = wid === fl.home_team_id ? fl.away_team_id : fl.home_team_id;
+              if (wid) return { champion: teamById[wid]?.name, runnerUp: lid ? teamById[lid]?.name : null };
+            }
+          }
+        }
+      }
+      return null;
+    };
+
+    // ── League Leaders ───────────────────────────────────────────────────
     const leagueLeaders = [];
     for (const t of tourRes.rows) {
-      if (t.type === 'league') {
-        const table = await computeTable(t.id);
-        if (table.length > 0 && table[0].mp > 0) {
-          const totalFixtures = await db.execute({ sql: 'SELECT COUNT(*) as c FROM fixtures WHERE tournament_id=? AND fixture_type=?', args: [t.id, 'league'] });
-          const playedFixtures = await db.execute({ sql: 'SELECT COUNT(*) as c FROM fixtures WHERE tournament_id=? AND fixture_type=? AND played=1', args: [t.id, 'league'] });
-          leagueLeaders.push({
-            tournament: t.name, leader: table[0].name, pts: table[0].pts,
-            matchday: playedFixtures.rows[0].c, totalMatchdays: totalFixtures.rows[0].c,
-            table: table.slice(0, 3)
-          });
-        }
+      if (t.type !== 'league') continue;
+      const table = computeTableFromFixtures(t.id);
+      if (table.length > 0 && table[0].mp > 0) {
+        const fixes = fixByTour[t.id] || [];
+        const leagueFixes = fixes.filter(f => f.fixture_type === 'league');
+        leagueLeaders.push({
+          tournament: t.name, leader: table[0].name, pts: table[0].pts,
+          matchday: leagueFixes.filter(f => f.played === 1).length,
+          totalMatchdays: leagueFixes.length,
+          table: table.slice(0, 3)
+        });
       }
     }
 
-    // Win streaks (find teams on hot streaks)
-    const allPlayedRes = await db.execute({
-      sql: `SELECT f.* FROM fixtures f
-            WHERE f.tournament_id IN (${placeholders}) AND f.played = 1
-            ORDER BY f.rowid DESC`,
-      args: [...tournamentIds]
-    });
-
+    // ── Win Streaks (from all played fixtures, newest first) ─────────────
+    const allPlayed = [...allFixtures].filter(f => f.played === 1).reverse();
     const teamStreaks = {};
-    for (const f of allPlayedRes.rows) {
+    for (const f of allPlayed) {
       const homeName = teamById[f.home_team_id]?.name;
       const awayName = teamById[f.away_team_id]?.name;
       if (!homeName || !awayName) continue;
-
-      // Track consecutive wins
       if (!teamStreaks[homeName]) teamStreaks[homeName] = { wins: 0, counting: true };
       if (!teamStreaks[awayName]) teamStreaks[awayName] = { wins: 0, counting: true };
-
       if (teamStreaks[homeName].counting) {
-        if (f.home_score > f.away_score) teamStreaks[homeName].wins++;
-        else teamStreaks[homeName].counting = false;
+        if (f.home_score > f.away_score) teamStreaks[homeName].wins++; else teamStreaks[homeName].counting = false;
       }
       if (teamStreaks[awayName].counting) {
-        if (f.away_score > f.home_score) teamStreaks[awayName].wins++;
-        else teamStreaks[awayName].counting = false;
+        if (f.away_score > f.home_score) teamStreaks[awayName].wins++; else teamStreaks[awayName].counting = false;
       }
     }
-
     const streaks = Object.entries(teamStreaks)
       .filter(([_, s]) => s.wins >= 2)
       .map(([name, s]) => ({ team: name, wins: s.wins }))
-      .sort((a, b) => b.wins - a.wins)
-      .slice(0, 5);
+      .sort((a, b) => b.wins - a.wins).slice(0, 5);
 
-    // Active tournaments with progress
-    const activeTournaments = tourRes.rows.slice(0, 5).map(t => {
-      const totalFix = allPlayedRes.rows.filter(f => f.tournament_id === t.id).length;
-      return { id: t.id, name: t.name, type: t.type, season: t.season, matchesPlayed: totalFix };
-    });
+    // ── Active Tournaments ───────────────────────────────────────────────
+    const activeTournaments = tourRes.rows.slice(0, 5).map(t => ({
+      id: t.id, name: t.name, type: t.type, season: t.season,
+      matchesPlayed: (fixByTour[t.id] || []).filter(f => f.played === 1).length
+    }));
+
+    // ── Season Info ──────────────────────────────────────────────────────
+    let seasonInfo = null;
+    if (seasonsRes.rows.length > 0) {
+      const active = seasonsRes.rows.find(s => s.status === 'active') || seasonsRes.rows[0];
+      const sn = active.season_number;
+      const seasonTours = tourRes.rows.filter(t => t.season_number === sn);
+      const seasonFixes = seasonTours.flatMap(t => fixByTour[t.id] || []);
+      const playedFixes = seasonFixes.filter(f => f.played === 1);
+      seasonInfo = {
+        seasonNumber: sn,
+        status: active.status,
+        tournamentCount: seasonTours.length,
+        totalMatches: seasonFixes.length,
+        playedMatches: playedFixes.length,
+        totalGoals: playedFixes.reduce((sum, f) => sum + (f.home_score || 0) + (f.away_score || 0), 0),
+        totalSeasons: seasonsRes.rows.length,
+      };
+    }
+
+    // ── Last Champion (most recent tournament with a winner) ─────────────
+    let lastChampion = null;
+    for (const t of tourRes.rows) {
+      const result = computeWinner(t);
+      if (result?.champion) {
+        lastChampion = { winner: result.champion, tournamentName: t.name, tournamentType: t.type, seasonNumber: t.season_number };
+        break;
+      }
+    }
+
+    // ── Season Quick Stats ───────────────────────────────────────────────
+    let seasonTopScorer = null, seasonTopElo = null, seasonTopPerformer = null;
+    if (seasonInfo) {
+      const sn = seasonInfo.seasonNumber;
+      const seasonTours = tourRes.rows.filter(t => t.season_number === sn);
+      const seasonPlayed = seasonTours.flatMap(t => (fixByTour[t.id] || []).filter(f => f.played === 1));
+
+      // Top scorer — from in-memory fixtures
+      const goalMap = {};
+      for (const f of seasonPlayed) {
+        const hN = teamById[f.home_team_id]?.name, aN = teamById[f.away_team_id]?.name;
+        if (hN) goalMap[hN] = (goalMap[hN] || 0) + (f.home_score || 0);
+        if (aN) goalMap[aN] = (goalMap[aN] || 0) + (f.away_score || 0);
+      }
+      const topGoal = Object.entries(goalMap).sort((a, b) => b[1] - a[1]);
+      if (topGoal.length > 0 && topGoal[0][1] > 0) {
+        seasonTopScorer = { team: topGoal[0][0], goals: topGoal[0][1] };
+      }
+
+      // Top ELO — from in-memory fixtures
+      const eloRatings = {};
+      const K = 32;
+      // Filter from allFixtures (already sorted by rowid = global chronological order, matching elo-ratings endpoint)
+      const seasonTourIds = new Set(seasonTours.map(t => t.id));
+      const seasonFixesChrono = allFixtures.filter(f => seasonTourIds.has(f.tournament_id) && f.played === 1);
+      for (const f of seasonFixesChrono) {
+        const hN = teamById[f.home_team_id]?.name, aN = teamById[f.away_team_id]?.name;
+        if (!hN || !aN) continue;
+        if (!eloRatings[hN]) eloRatings[hN] = 1200;
+        if (!eloRatings[aN]) eloRatings[aN] = 1200;
+        const eH = 1 / (1 + Math.pow(10, (eloRatings[aN] - eloRatings[hN]) / 400));
+        const eA = 1 / (1 + Math.pow(10, (eloRatings[hN] - eloRatings[aN]) / 400));
+        const aH = f.home_score > f.away_score ? 1 : f.home_score < f.away_score ? 0 : 0.5;
+        const gd = Math.abs(f.home_score - f.away_score);
+        const mult = gd <= 1 ? 1 : gd === 2 ? 1.5 : (1.5 + (gd - 2) * 0.25);
+        const koB = f.fixture_type === 'knockout' ? 1.3 : 1;
+        eloRatings[hN] += Math.round(K * mult * koB * (aH - eH));
+        eloRatings[aN] += Math.round(K * mult * koB * ((1 - aH) - eA));
+      }
+      const topElo = Object.entries(eloRatings).sort((a, b) => b[1] - a[1]);
+      if (topElo.length > 0 && topElo[0][1] !== 1200) {
+        seasonTopElo = { team: topElo[0][0], elo: topElo[0][1] };
+      }
+
+      // Top performer — reuse computeWinner
+      const perfMap = {};
+      for (const t of seasonTours) {
+        const result = computeWinner(t);
+        if (result?.champion) { perfMap[result.champion] = perfMap[result.champion] || { gold: 0, silver: 0 }; perfMap[result.champion].gold++; }
+        if (result?.runnerUp) { perfMap[result.runnerUp] = perfMap[result.runnerUp] || { gold: 0, silver: 0 }; perfMap[result.runnerUp].silver++; }
+      }
+      const sorted = Object.entries(perfMap)
+        .map(([name, m]) => ({ name, gold: m.gold, silver: m.silver, score: m.gold * 3 + m.silver }))
+        .sort((a, b) => b.score - a.score || b.gold - a.gold);
+      if (sorted.length > 0 && sorted[0].score > 0) {
+        seasonTopPerformer = { team: sorted[0].name, gold: sorted[0].gold, silver: sorted[0].silver };
+      }
+    }
 
     res.json({
       activeTournaments,
       recentResults: recentRes.rows.map(mapFixture),
       upcomingFixtures: upcomingRes.rows.map(mapFixture),
       leagueLeaders,
-      streaks
+      streaks,
+      seasonInfo,
+      lastChampion,
+      seasonTopScorer,
+      seasonTopElo,
+      seasonTopPerformer,
     });
   } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
 });
@@ -2079,6 +2294,120 @@ app.get('/api/voice/rooms/:code', (req, res) => {
   res.json(rooms);
 });
 
+// ─── Seasons ──────────────────────────────────────────────────────────────────
+// Returns all seasons for the user's group, plus info on active season
+app.get('/api/seasons', requireAuth, async (req, res) => {
+  try {
+    const result = await db.execute({
+      sql: 'SELECT * FROM seasons WHERE code=? ORDER BY season_number ASC',
+      args: [req.user.code]
+    });
+    // Count tournaments per season
+    const seasons = await Promise.all(result.rows.map(async (s) => {
+      const countRes = await db.execute({
+        sql: 'SELECT COUNT(*) as c FROM tournaments WHERE code=? AND season_number=?',
+        args: [req.user.code, s.season_number]
+      });
+      return {
+        id: s.id,
+        seasonNumber: s.season_number,
+        status: s.status,
+        createdAt: s.created_at,
+        completedAt: s.completed_at,
+        tournamentCount: Number(countRes.rows[0].c)
+      };
+    }));
+    res.json(seasons);
+  } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
+});
+
+// Create Season 1 (or next season if previous is completed)
+app.post('/api/seasons', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    // Find the latest season
+    const latest = await db.execute({
+      sql: 'SELECT * FROM seasons WHERE code=? ORDER BY season_number DESC LIMIT 1',
+      args: [req.user.code]
+    });
+    if (latest.rows.length > 0) {
+      const lastSeason = latest.rows[0];
+      // Cannot create new season if there's already an active one
+      if (lastSeason.status === 'active') {
+        return res.status(400).json({ error: `Season ${lastSeason.season_number} is still active. Complete it first before starting a new season.` });
+      }
+    }
+    const newSeasonNumber = latest.rows.length > 0 ? latest.rows[0].season_number + 1 : 1;
+    const season = {
+      id: uuidv4(),
+      code: req.user.code,
+      season_number: newSeasonNumber,
+      status: 'active',
+      created_at: new Date().toISOString(),
+      completed_at: null
+    };
+    await db.execute({
+      sql: 'INSERT INTO seasons (id,code,season_number,status,created_at,completed_at) VALUES (?,?,?,?,?,?)',
+      args: [season.id, season.code, season.season_number, season.status, season.created_at, season.completed_at]
+    });
+    res.status(201).json({ id: season.id, seasonNumber: season.season_number, status: season.status, createdAt: season.created_at });
+  } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
+});
+
+// ─── Migrate existing tournaments → Season 1 ─────────────────────────────────
+// One-time migration: creates Season 1 (if it doesn't exist) and assigns all
+// tournaments that have no season_number to Season 1.
+app.post('/api/seasons/migrate-to-season1', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    // Check if Season 1 already exists for this group
+    const existing = await db.execute({
+      sql: 'SELECT * FROM seasons WHERE code=? AND season_number=1',
+      args: [req.user.code]
+    });
+
+    if (existing.rows.length === 0) {
+      // Create Season 1 as active
+      await db.execute({
+        sql: 'INSERT INTO seasons (id,code,season_number,status,created_at,completed_at) VALUES (?,?,?,?,?,?)',
+        args: [uuidv4(), req.user.code, 1, 'active', new Date().toISOString(), null]
+      });
+    }
+
+    // Assign all tournaments without a season_number to Season 1
+    const updateRes = await db.execute({
+      sql: 'UPDATE tournaments SET season_number=1 WHERE code=? AND (season_number IS NULL OR season_number = 0)',
+      args: [req.user.code]
+    });
+
+    const moved = updateRes.rowsAffected ?? 0;
+    const seasonStatus = existing.rows.length > 0 ? existing.rows[0].status : 'active';
+
+    res.json({
+      message: `Migration complete. Season 1 ${existing.rows.length > 0 ? 'already existed' : 'created'}. ${moved} tournament(s) assigned to Season 1.`,
+      seasonCreated: existing.rows.length === 0,
+      seasonStatus,
+      tournamentsMoved: moved,
+    });
+  } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
+});
+
+// Complete a season
+app.post('/api/seasons/:num/complete', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const seasonNum = parseInt(req.params.num);
+    const seasonRes = await db.execute({
+      sql: 'SELECT * FROM seasons WHERE code=? AND season_number=?',
+      args: [req.user.code, seasonNum]
+    });
+    if (seasonRes.rows.length === 0) return res.status(404).json({ error: 'Season not found' });
+    if (seasonRes.rows[0].status === 'completed') return res.status(400).json({ error: 'Season is already completed' });
+    await db.execute({
+      sql: 'UPDATE seasons SET status=?, completed_at=? WHERE code=? AND season_number=?',
+      args: ['completed', new Date().toISOString(), req.user.code, seasonNum]
+    });
+    res.json({ message: `Season ${seasonNum} completed` });
+  } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
+});
+
 // ─── Start ────────────────────────────────────────────────────────────────────
 async function startServer() {
   initDb();
@@ -2141,9 +2470,21 @@ async function startServer() {
     name TEXT NOT NULL, created_date TEXT NOT NULL,
     created_at TEXT NOT NULL
   )`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS seasons (
+    id TEXT PRIMARY KEY,
+    code TEXT NOT NULL,
+    season_number INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL,
+    completed_at TEXT DEFAULT NULL
+  )`);
   // Add is_admin column if not exists (safe for existing DBs)
   try {
     await db.execute(`ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0`);
+  } catch(_) { /* column already exists */ }
+  // Add season_number column to tournaments if not exists
+  try {
+    await db.execute(`ALTER TABLE tournaments ADD COLUMN season_number INTEGER DEFAULT NULL`);
   } catch(_) { /* column already exists */ }
   // Add used_by column to admin_keys if not exists
   try {
