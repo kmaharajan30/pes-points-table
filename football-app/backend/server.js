@@ -1993,8 +1993,9 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
       // Top ELO — from in-memory fixtures
       const eloRatings = {};
       const K = 32;
-      // Use chronological order (allFixtures is already sorted by rowid)
-      const seasonFixesChrono = seasonTours.flatMap(t => (fixByTour[t.id] || []).filter(f => f.played === 1));
+      // Filter from allFixtures (already sorted by rowid = global chronological order, matching elo-ratings endpoint)
+      const seasonTourIds = new Set(seasonTours.map(t => t.id));
+      const seasonFixesChrono = allFixtures.filter(f => seasonTourIds.has(f.tournament_id) && f.played === 1);
       for (const f of seasonFixesChrono) {
         const hN = teamById[f.home_team_id]?.name, aN = teamById[f.away_team_id]?.name;
         if (!hN || !aN) continue;
