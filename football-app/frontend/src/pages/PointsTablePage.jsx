@@ -17,8 +17,8 @@ function Stat({ label, value, color = 'text.primary', highlight = false }) {
   return (
     <Box sx={{
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      minWidth: { xs: 28, sm: 36 },
-      px: { xs: 0.25, sm: 0.5 },
+      minWidth: { xs: 24, sm: 36 },
+      px: { xs: 0, sm: 0.5 },
     }}>
       <Typography sx={{
         fontWeight: 800,
@@ -75,7 +75,7 @@ function HeaderRow() {
           <Typography key={h} sx={{
             fontWeight: 800, fontSize: 10,
             color: h === 'PTS' ? 'primary.main' : 'text.secondary',
-            minWidth: { xs: 28, sm: 36 },
+            minWidth: { xs: 24, sm: 36 },
             textAlign: 'center',
             letterSpacing: '0.04em',
           }}>
@@ -133,25 +133,15 @@ function TeamRow({ row, rank, isLast }) {
           }}>
             {row.name}
           </Typography>
-          {/* mobile: show W-D-L inline under name */}
-          <Typography sx={{
-            display: { xs: 'block', sm: 'none' },
-            fontSize: 9, color: 'text.secondary', fontWeight: 600,
-          }}>
-            {row.w}W · {row.d}D · {row.l}L
-          </Typography>
         </Box>
       </Box>
 
       {/* Stats */}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 0, sm: 0.5 }, flexShrink: 0 }}>
         <Stat label="MP" value={row.mp} />
-        {/* W D L hidden on xs — shown in name subtitle instead */}
-        <Box sx={{ display: { xs: 'none', sm: 'flex' }, gap: 0.5 }}>
-          <Stat label="W" value={row.w} color={row.w > 0 ? 'primary.main' : 'text.secondary'} />
-          <Stat label="D" value={row.d} color={row.d > 0 ? 'warning.main' : 'text.secondary'} />
-          <Stat label="L" value={row.l} color={row.l > 0 ? 'error.main' : 'text.secondary'} />
-        </Box>
+        <Stat label="W" value={row.w} color={row.w > 0 ? 'primary.main' : 'text.secondary'} />
+        <Stat label="D" value={row.d} color={row.d > 0 ? 'warning.main' : 'text.secondary'} />
+        <Stat label="L" value={row.l} color={row.l > 0 ? 'error.main' : 'text.secondary'} />
         <Stat label="GD" value={gdLabel} color={gdColor} />
         <Stat label="PTS" value={row.pts} color={row.pts > 0 ? 'primary.main' : 'text.secondary'} highlight={row.pts > 0} />
       </Box>
