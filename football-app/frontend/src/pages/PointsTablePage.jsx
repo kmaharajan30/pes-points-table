@@ -17,20 +17,22 @@ function Stat({ label, value, color = 'text.primary', highlight = false }) {
   return (
     <Box sx={{
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      minWidth: { xs: 24, sm: 36 },
-      px: { xs: 0, sm: 0.5 },
+      width: { xs: 30, sm: 40 },
+      flexShrink: 0,
     }}>
       <Typography sx={{
         fontWeight: 800,
-        fontSize: { xs: '0.8rem', sm: '0.9rem' },
+        fontSize: { xs: '0.78rem', sm: '0.9rem' },
         color,
         lineHeight: 1,
+        textAlign: 'center',
         ...(highlight && {
           bgcolor: 'rgba(0,230,118,0.12)',
           border: '1px solid rgba(0,230,118,0.25)',
           borderRadius: 1,
-          px: 1, py: 0.25,
-          minWidth: 28,
+          px: { xs: 0.5, sm: 1 },
+          py: 0.25,
+          minWidth: { xs: 24, sm: 28 },
           textAlign: 'center',
         }),
       }}>
@@ -64,18 +66,18 @@ function HeaderRow() {
       {/* rank */}
       <Box sx={{ width: { xs: 20, sm: 24 }, flexShrink: 0 }} />
       {/* club */}
-      <Box sx={{ flex: 1, minWidth: 0, ml: { xs: 1, sm: 1.5 } }}>
+      <Box sx={{ flex: 1, minWidth: 0, ml: { xs: 1, sm: 1.5 }, mr: { xs: 0.5, sm: 1 } }}>
         <Typography variant="caption" sx={{ fontWeight: 800, fontSize: 10, color: 'text.secondary', letterSpacing: '0.08em' }}>
           CLUB
         </Typography>
       </Box>
       {/* stats */}
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 0, sm: 0.5 }, flexShrink: 0 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
         {['MP','W','D','L','GD','PTS'].map(h => (
           <Typography key={h} sx={{
-            fontWeight: 800, fontSize: 10,
+            fontWeight: 800, fontSize: { xs: 10, sm: 11 },
             color: h === 'PTS' ? 'primary.main' : 'text.secondary',
-            minWidth: { xs: 24, sm: 36 },
+            width: { xs: 30, sm: 40 },
             textAlign: 'center',
             letterSpacing: '0.04em',
           }}>
@@ -114,7 +116,7 @@ function TeamRow({ row, rank, isLast }) {
 
       {/* Club */}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 0.75, sm: 1.25 },
-        flex: 1, minWidth: 0, ml: { xs: 0.75, sm: 1.5 } }}>
+        flex: 1, minWidth: 0, ml: { xs: 0.75, sm: 1.5 }, mr: { xs: 0.5, sm: 1 } }}>
         <Avatar sx={{
           bgcolor: color, color: '#000', fontWeight: 800,
           fontSize: { xs: 9, sm: 11 },
@@ -137,7 +139,7 @@ function TeamRow({ row, rank, isLast }) {
       </Box>
 
       {/* Stats */}
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 0, sm: 0.5 }, flexShrink: 0 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
         <Stat label="MP" value={row.mp} />
         <Stat label="W" value={row.w} color={row.w > 0 ? 'primary.main' : 'text.secondary'} />
         <Stat label="D" value={row.d} color={row.d > 0 ? 'warning.main' : 'text.secondary'} />
