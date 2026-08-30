@@ -12,32 +12,51 @@ const COLORS = ['#00e676','#651fff','#ff5252','#ffd740','#40c4ff','#ff6e40','#b2
 const getColor = (n='') => { let h=0; for(const c of n) h=(h*31+c.charCodeAt(0))&0xffffffff; return COLORS[Math.abs(h)%COLORS.length]; };
 const getInit  = (n='') => n.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
 
+// Column widths — shared between header and data rows so they stay in sync
+const COL_WIDTHS = {
+  MP:  { xs: 30, sm: 38 },
+  W:   { xs: 30, sm: 38 },
+  D:   { xs: 30, sm: 38 },
+  L:   { xs: 30, sm: 38 },
+  GD:  { xs: 38, sm: 48 },   // wider — signed values like +10 / -12
+  PTS: { xs: 34, sm: 44 },
+};
+
 // ── Stat box ──────────────────────────────────────────────────────────────────
 function Stat({ label, value, color = 'text.primary', highlight = false }) {
+  const w = COL_WIDTHS[label] ?? { xs: 26, sm: 36 };
   return (
     <Box sx={{
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      width: { xs: 30, sm: 40 },
-      flexShrink: 0,
+      width: w, flexShrink: 0,
     }}>
-      <Typography sx={{
-        fontWeight: 800,
-        fontSize: { xs: '0.78rem', sm: '0.9rem' },
-        color,
-        lineHeight: 1,
-        textAlign: 'center',
-        ...(highlight && {
+      {highlight ? (
+        <Box sx={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
           bgcolor: 'rgba(0,230,118,0.12)',
           border: '1px solid rgba(0,230,118,0.25)',
           borderRadius: 1,
-          px: { xs: 0.5, sm: 1 },
-          py: 0.25,
-          minWidth: { xs: 24, sm: 28 },
-          textAlign: 'center',
-        }),
-      }}>
-        {value}
-      </Typography>
+          width: { xs: 22, sm: 28 },
+          height: { xs: 20, sm: 24 },
+        }}>
+          <Typography sx={{
+            fontWeight: 800,
+            fontSize: { xs: '0.75rem', sm: '0.88rem' },
+            color, lineHeight: 1, textAlign: 'center',
+          }}>
+            {value}
+          </Typography>
+        </Box>
+      ) : (
+        <Typography sx={{
+          fontWeight: 800,
+          fontSize: { xs: '0.75rem', sm: '0.88rem' },
+          color, lineHeight: 1, textAlign: 'center',
+          width: '100%',
+        }}>
+          {value}
+        </Typography>
+      )}
     </Box>
   );
 }
@@ -71,15 +90,16 @@ function HeaderRow() {
           CLUB
         </Typography>
       </Box>
-      {/* stats */}
+      {/* stats — widths must match COL_WIDTHS */}
       <Box sx={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
         {['MP','W','D','L','GD','PTS'].map(h => (
           <Typography key={h} sx={{
             fontWeight: 800, fontSize: { xs: 10, sm: 11 },
             color: h === 'PTS' ? 'primary.main' : 'text.secondary',
-            width: { xs: 30, sm: 40 },
+            width: COL_WIDTHS[h],
             textAlign: 'center',
             letterSpacing: '0.04em',
+            flexShrink: 0,
           }}>
             {h}
           </Typography>
