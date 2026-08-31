@@ -11,13 +11,15 @@ import DeleteOutlineRoundedIcon from '@mui/icons-material/DeleteOutlineRounded';
 import CheckCircleOutlineRoundedIcon from '@mui/icons-material/CheckCircleOutlineRounded';
 import SportsSoccerRoundedIcon from '@mui/icons-material/SportsSoccerRounded';
 import TrendingUpRoundedIcon from '@mui/icons-material/TrendingUpRounded';
+import PersonRemoveRoundedIcon from '@mui/icons-material/PersonRemoveRounded';
 import PageHeader from '../components/PageHeader';
 import ConfirmDialog from '../components/ConfirmDialog';
 import LoadingState from '../components/LoadingState';
 import {
   getGroupTables, getGroupFixtures, getGroupKnockout,
   generateFixtures, seedKnockout, resetKnockoutSeeds, seedFinal,
-  addResult, deleteFixture, regenerateQuarterFinals
+  addResult, deleteFixture, regenerateQuarterFinals,
+  getTeams, deleteTeam
 } from '../api/footballApi';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
@@ -323,27 +325,30 @@ function useGroupKnockoutData(tournamentId) {
   const [groupTables,   setGroupTables]   = useState([]);
   const [groupFixtures, setGroupFixtures] = useState([]);
   const [bracket,       setBracket]       = useState([]);
+  const [teams,         setTeams]         = useState([]);
   const [loading,       setLoading]       = useState(true);
   const [error,         setError]         = useState('');
 
   const load = async () => {
     setLoading(true);
     try {
-      const [gtRes, gfRes, brRes] = await Promise.all([
+      const [gtRes, gfRes, brRes, tmRes] = await Promise.all([
         getGroupTables(tournamentId),
         getGroupFixtures(tournamentId),
         getGroupKnockout(tournamentId),
+        getTeams(tournamentId),
       ]);
       setGroupTables(gtRes.data);
       setGroupFixtures(gfRes.data);
       setBracket(brRes.data);
+      setTeams(tmRes.data);
     } catch(e) { setError(e?.response?.data?.error || 'Failed to load'); }
     setLoading(false);
   };
 
   useEffect(() => { load(); }, [tournamentId]);
 
-  return { groupTables, groupFixtures, bracket, loading, error, setError, load };
+  return { groupTables, groupFixtures, bracket, teams, loading, error, setError, load };
 }
 
 // ── TABLE VIEW ─────────────────────────────────────────────────────────────────
@@ -406,7 +411,7 @@ function TableView({ tournament, groupTables, loading, error, setError, bracket 
 // ── FIXTURES VIEW ──────────────────────────────────────────────────────────────
 export default function GroupKnockoutPage({ tournament, view = 'fixtures', isAdmin }) {
   // All hooks must be called unconditionally (Rules of Hooks)
-  const { groupTables, groupFixtures, bracket, loading, error, setError, load } = useGroupKnockoutData(tournament.id);
+  const { groupTables, groupFixtures, bracket, teams, loading, error, setError, load } = useGroupKnockoutData(tournament.id);
 
   const [generating,    setGenerating]   = useState(false);
   const [seeding,       setSeeding]      = useState(false);
@@ -422,9 +427,37 @@ export default function GroupKnockoutPage({ tournament, view = 'fixtures', isAdm
     num_groups: tournament.numGroups || 2,
     legs: tournament.legs || 1,
   });
+  // Remove Team state
+  const [removeTeamOpen, setRemoveTeamOpen]     = useState(false);
+  const [teamToRemove, setTeamToRemove]          = useState(null);
+  const [removeTeamSaving, setRemoveTeamSaving] = useState(false);
 
   // Table view delegates to TableView after all hooks are called
   if (view === 'table') return <TableView groupTables={groupTables} loading={loading} error={error} setError={setError} tournament={tournament} bracket={bracket} />;
+
+  // Helper to count fixtures involving a team
+  const teamFixtureCount = (teamId) =>
+    groupFixtures.filter(f => f.homeTeamId === teamId || f.awayTeamId === teamId).length;
+  const teamPlayedCount = (teamId) =>
+    groupFixtures.filter(f => (f.homeTeamId === teamId || f.awayTeamId === teamId) && f.played).length;
+
+  // Remove team handler — deletes team and all their group fixtures
+  const handleRemoveTeam = async () => {
+    if (!teamToRemove) return;
+    setRemoveTeamSaving(true);
+    try {
+      await deleteTeam(tournament.id, teamToRemove.id);
+      setTeamToRemove(null);
+      setRemoveTeamOpen(false);
+      await load();
+      setSuccessMsg(`${teamToRemove.name} removed. Group fixtures updated.`);
+    } catch (e) {
+      setTeamToRemove(null);
+      setRemoveTeamOpen(false);
+      setError(e?.response?.data?.error || 'Failed to remove team');
+    }
+    setRemoveTeamSaving(false);
+  };
 
   const openGenerate = () => {
     // Pre-fill dialog with current tournament settings
@@ -581,6 +614,15 @@ export default function GroupKnockoutPage({ tournament, view = 'fixtures', isAdm
             sx={{ borderColor:'rgba(255,152,0,0.4)', color:'#ff9800', fontSize:{ xs:11, sm:12 },
               '&:hover':{ borderColor:'#ff9800', bgcolor:'rgba(255,152,0,0.08)' } }}>
             {regenQF ? 'Regenerating…' : 'Regenerate QF'}
+          </Button>
+        )}
+        {teams.length > 0 && (
+          <Button variant="outlined" size="small"
+            startIcon={<PersonRemoveRoundedIcon sx={{ fontSize:'16px !important' }} />}
+            onClick={()=>setRemoveTeamOpen(true)}
+            sx={{ borderColor:'rgba(255,82,82,0.35)', color:'error.main', fontSize:{ xs:11, sm:13 },
+              '&:hover':{ borderColor:'error.main', bgcolor:'rgba(255,82,82,0.06)' } }}>
+            Remove Team
           </Button>
         )}
         </Box>
@@ -763,6 +805,86 @@ export default function GroupKnockoutPage({ tournament, view = 'fixtures', isAdm
             sx={{ background:'linear-gradient(135deg,#651fff,#3500cb)', color:'#fff' }}>
             {groupFixtures.length > 0 ? 'Re-draw' : 'Generate'}
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Remove Team dialog ─────────────────────────────────────────── */}
+      <Dialog open={removeTeamOpen} onClose={()=>{ setRemoveTeamOpen(false); setTeamToRemove(null); }}
+        maxWidth="xs" fullWidth
+        PaperProps={{ sx:{ borderRadius:3 } }}>
+        <DialogTitle sx={{ pb:1 }}>
+          <Box sx={{ display:'flex', alignItems:'center', gap:1.25 }}>
+            <PersonRemoveRoundedIcon sx={{ color:'error.main', fontSize:18 }} />
+            <Typography variant="subtitle1" sx={{ fontWeight:700 }}>Remove Team from Group</Typography>
+          </Box>
+        </DialogTitle>
+        <DialogContent sx={{ display:'flex', flexDirection:'column', gap:2, pt:'12px !important' }}>
+          {!teamToRemove ? (
+            <>
+              <Typography variant="body2" color="text.secondary" sx={{ fontSize:12 }}>
+                Select a team to remove. All their group fixtures and results will be permanently deleted, and the group table will update automatically.
+              </Typography>
+              <Stack spacing={1}>
+                {teams.map(t => {
+                  const total  = teamFixtureCount(t.id);
+                  const played = teamPlayedCount(t.id);
+                  const grp = t.groupName || '?';
+                  return (
+                    <Box key={t.id}
+                      onClick={()=>setTeamToRemove(t)}
+                      sx={{ display:'flex', alignItems:'center', gap:1.5, p:1.25, borderRadius:1.5, cursor:'pointer',
+                        border:'1px solid rgba(255,82,82,0.15)', bgcolor:'rgba(255,82,82,0.04)',
+                        '&:hover':{ bgcolor:'rgba(255,82,82,0.1)', borderColor:'rgba(255,82,82,0.4)' },
+                        transition:'all 0.15s' }}>
+                      <TeamBadge name={t.name} size={30} />
+                      <Box sx={{ flex:1, minWidth:0 }}>
+                        <Box sx={{ display:'flex', alignItems:'center', gap:0.75 }}>
+                          <Typography variant="body2" sx={{ fontWeight:700 }} noWrap>{t.name}</Typography>
+                          <Chip label={`Group ${grp}`} size="small"
+                            sx={{ height:16, fontSize:9, fontWeight:700, bgcolor:'rgba(255,152,0,0.12)', color:'#ff9800', border:'1px solid rgba(255,152,0,0.25)' }} />
+                        </Box>
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize:10 }}>
+                          {total} fixture{total!==1?'s':''} · {played} played
+                        </Typography>
+                      </Box>
+                      <DeleteOutlineRoundedIcon sx={{ fontSize:18, color:'error.main', flexShrink:0 }} />
+                    </Box>
+                  );
+                })}
+              </Stack>
+            </>
+          ) : (
+            <>
+              <Alert severity="warning" sx={{ fontSize:12 }}>
+                Remove <strong>{teamToRemove.name}</strong> from Group {teamToRemove.groupName || '?'}? This will permanently delete{' '}
+                <strong>{teamFixtureCount(teamToRemove.id)} fixture{teamFixtureCount(teamToRemove.id)!==1?'s':''}</strong>
+                {teamPlayedCount(teamToRemove.id) > 0 && (
+                  <> including <strong>{teamPlayedCount(teamToRemove.id)} played result{teamPlayedCount(teamToRemove.id)!==1?'s':''}</strong></>
+                )}
+                . The group table will update automatically.
+              </Alert>
+              <Box sx={{ display:'flex', alignItems:'center', gap:1.5, p:1.25, borderRadius:1.5,
+                border:'1px solid rgba(255,82,82,0.3)', bgcolor:'rgba(255,82,82,0.06)' }}>
+                <TeamBadge name={teamToRemove.name} size={32} />
+                <Box>
+                  <Typography variant="body2" sx={{ fontWeight:700 }}>{teamToRemove.name}</Typography>
+                  <Chip label={`Group ${teamToRemove.groupName || '?'}`} size="small"
+                    sx={{ height:16, fontSize:9, fontWeight:700, mt:0.25, bgcolor:'rgba(255,152,0,0.12)', color:'#ff9800', border:'1px solid rgba(255,152,0,0.25)' }} />
+                </Box>
+              </Box>
+            </>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ px:2.5, pb:2.5, gap:1 }}>
+          <Button onClick={()=>{ setRemoveTeamOpen(false); setTeamToRemove(null); }}
+            variant="outlined" color="inherit" size="small"
+            sx={{ borderColor:'rgba(255,255,255,0.15)' }}>Cancel</Button>
+          {teamToRemove && (
+            <Button onClick={handleRemoveTeam} variant="contained" color="error" size="small"
+              disabled={removeTeamSaving}>
+              {removeTeamSaving ? 'Removing…' : `Remove ${teamToRemove.name}`}
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
     </Box>
