@@ -58,10 +58,11 @@ export const createTournament  = (data)     => axios.post(`${BASE}/tournaments`,
 export const deleteTournament  = (id)       => axios.delete(`${BASE}/tournaments/${id}`);
 
 // Teams
-export const getTeams   = (tId)          => axios.get(`${BASE}/tournaments/${tId}/teams`);
-export const createTeam = (tId, data)    => axios.post(`${BASE}/tournaments/${tId}/teams`, data);
-export const renameTeam = (tId, teamId, data) => axios.put(`${BASE}/tournaments/${tId}/teams/${teamId}`, data);
-export const deleteTeam = (tId, teamId)  => axios.delete(`${BASE}/tournaments/${tId}/teams/${teamId}`);
+export const getTeams            = (tId)                => axios.get(`${BASE}/tournaments/${tId}/teams`);
+export const createTeam          = (tId, data)          => axios.post(`${BASE}/tournaments/${tId}/teams`, data);
+export const renameTeam          = (tId, teamId, data)  => axios.put(`${BASE}/tournaments/${tId}/teams/${teamId}`, data);
+export const deleteTeam          = (tId, teamId)        => axios.delete(`${BASE}/tournaments/${tId}/teams/${teamId}`);
+export const addTeamToFixtures   = (tId, teamId)        => axios.post(`${BASE}/tournaments/${tId}/teams/${teamId}/add-to-fixtures`);
 
 // Fixtures
 export const getFixtures        = (tId)            => axios.get(`${BASE}/tournaments/${tId}/fixtures`);

@@ -523,10 +523,52 @@ app.put('/api/tournaments/:tId/teams/:teamId', requireAuth, async (req, res) => 
 
 app.delete('/api/tournaments/:tId/teams/:teamId', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { teamId } = req.params;
-    await db.execute({ sql: 'DELETE FROM fixtures WHERE home_team_id=? OR away_team_id=?', args: [teamId, teamId] });
+    const { tId, teamId } = req.params;
+    // Verify team belongs to this tournament
+    const teamCheck = await db.execute({ sql: 'SELECT id FROM teams WHERE id=? AND tournament_id=?', args: [teamId, tId] });
+    if (teamCheck.rows.length === 0) return res.status(404).json({ error: 'Team not found in this tournament' });
+    // Delete only fixtures in this tournament that involve the team
+    await db.execute({ sql: 'DELETE FROM fixtures WHERE tournament_id=? AND (home_team_id=? OR away_team_id=?)', args: [tId, teamId, teamId] });
     await db.execute({ sql: 'DELETE FROM teams WHERE id=?', args: [teamId] });
     res.json({ message: 'Team and related fixtures deleted' });
+  } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
+});
+
+// ─── Add team to existing league fixtures ─────────────────────────────────────
+app.post('/api/tournaments/:tId/teams/:teamId/add-to-fixtures', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { tId, teamId } = req.params;
+    // Verify tournament exists and is a league
+    const tRes = await db.execute({ sql: 'SELECT * FROM tournaments WHERE id=? AND code=?', args: [tId, req.user.code] });
+    if (tRes.rows.length === 0) return res.status(404).json({ error: 'Tournament not found' });
+    const t = tRes.rows[0];
+    if (t.type !== 'league') return res.status(400).json({ error: 'Only league tournaments support incremental team addition' });
+    // Verify team belongs to this tournament
+    const teamCheck = await db.execute({ sql: 'SELECT * FROM teams WHERE id=? AND tournament_id=?', args: [teamId, tId] });
+    if (teamCheck.rows.length === 0) return res.status(404).json({ error: 'Team not found in this tournament' });
+    const newTeam = teamCheck.rows[0];
+    // Get all other teams in the tournament
+    const othersRes = await db.execute({ sql: 'SELECT * FROM teams WHERE tournament_id=? AND id!=?', args: [tId, teamId] });
+    const others = othersRes.rows;
+    if (others.length === 0) return res.status(400).json({ error: 'No other teams in the tournament to generate fixtures against' });
+    // Check if fixtures already exist for this team (avoid duplicates)
+    const existingCheck = await db.execute({ sql: 'SELECT id FROM fixtures WHERE tournament_id=? AND (home_team_id=? OR away_team_id=?) LIMIT 1', args: [tId, teamId, teamId] });
+    if (existingCheck.rows.length > 0) return res.status(400).json({ error: 'Fixtures for this team already exist. Remove them first or delete the team and re-add.' });
+    // Generate new team vs every other team (respects tournament legs setting)
+    const legs = t.legs || 2;
+    const newFixtures = [];
+    for (const other of others) {
+      newFixtures.push({ id: uuidv4(), tournament_id: tId, home_team_id: newTeam.id, away_team_id: other.id, fixture_type: 'league', leg: 1 });
+      if (legs === 2) {
+        newFixtures.push({ id: uuidv4(), tournament_id: tId, home_team_id: other.id, away_team_id: newTeam.id, fixture_type: 'league', leg: 2 });
+      }
+    }
+    const stmts = newFixtures.map(f => ({
+      sql: 'INSERT INTO fixtures (id,tournament_id,home_team_id,away_team_id,fixture_type,round,match_number,leg,group_name) VALUES (?,?,?,?,?,?,?,?,?)',
+      args: [f.id, f.tournament_id, f.home_team_id, f.away_team_id, f.fixture_type, null, null, f.leg, null]
+    }));
+    await db.batch(stmts, 'write');
+    res.json({ message: `Generated ${newFixtures.length} fixtures for ${newTeam.name}`, count: newFixtures.length, teamName: newTeam.name });
   } catch(e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
 });
 
