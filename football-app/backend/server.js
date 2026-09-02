@@ -85,6 +85,22 @@ async function teamMap(tournamentId) {
   return Object.fromEntries(result.rows.map(t => [t.id, t]));
 }
 
+// Chronological comparator for fixtures based on when a match was actually
+// played. Prefers played_at (set when the result is entered), then the
+// scheduled date, then rowid (insertion order) as a stable fallback. Returns
+// a negative number when `a` was played before `b`.
+function playKey(f) {
+  return f.played_at || f.date || '';
+}
+function byPlayOrder(a, b) {
+  const ka = playKey(a), kb = playKey(b);
+  if (ka && kb) { if (ka < kb) return -1; if (ka > kb) return 1; }
+  else if (ka && !kb) return -1;   // dated matches come before undated
+  else if (!ka && kb) return 1;
+  // fall back to insertion order (rowid) when timestamps are equal/absent
+  return (a.rowid ?? 0) - (b.rowid ?? 0);
+}
+
 async function computeTable(tournamentId) {
   const teamsRes = await db.execute({ sql: 'SELECT * FROM teams WHERE tournament_id = ?', args: [tournamentId] });
   const fixRes   = await db.execute({ sql: 'SELECT * FROM fixtures WHERE tournament_id = ? AND played = 1 AND fixture_type = ?', args: [tournamentId, 'league'] });
@@ -1711,7 +1727,7 @@ app.get('/api/elo-ratings', requireAuth, async (req, res) => {
       sql: `SELECT f.*, t.name as tournament_name FROM fixtures f
             JOIN tournaments t ON f.tournament_id = t.id
             WHERE f.tournament_id IN (${placeholders}) AND f.played = 1
-            ORDER BY f.rowid`,
+            ORDER BY COALESCE(f.played_at, f.date, '') ASC, f.rowid ASC`,
       args: [...tournamentIds]
     });
 
@@ -1846,7 +1862,7 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
         args: [...tournamentIds]
       }),
       db.execute({ sql: `SELECT * FROM teams WHERE tournament_id IN (${placeholders})`, args: [...tournamentIds] }),
-      db.execute({ sql: `SELECT * FROM fixtures WHERE tournament_id IN (${placeholders}) ORDER BY rowid`, args: [...tournamentIds] }),
+      db.execute({ sql: `SELECT f.*, f.rowid as rowid FROM fixtures f WHERE f.tournament_id IN (${placeholders}) ORDER BY f.rowid`, args: [...tournamentIds] }),
       db.execute({ sql: `SELECT * FROM knockout_rounds WHERE tournament_id IN (${placeholders})`, args: [...tournamentIds] }),
       db.execute({ sql: 'SELECT * FROM seasons WHERE code=? ORDER BY season_number DESC', args: [code] }),
     ]);
@@ -1958,7 +1974,10 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
     }
 
     // ── Win Streaks (from all played fixtures, newest first) ─────────────
-    const allPlayed = [...allFixtures].filter(f => f.played === 1).reverse();
+    // Sort by actual play time (played_at) descending so a team's *current*
+    // streak reflects the order matches were played, not the order fixtures
+    // were created.
+    const allPlayed = [...allFixtures].filter(f => f.played === 1).sort((a, b) => byPlayOrder(b, a));
     const teamStreaks = {};
     for (const f of allPlayed) {
       const homeName = teamById[f.home_team_id]?.name;
@@ -2035,9 +2054,13 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
       // Top ELO — from in-memory fixtures
       const eloRatings = {};
       const K = 32;
-      // Filter from allFixtures (already sorted by rowid = global chronological order, matching elo-ratings endpoint)
+      // Order by when the match was actually played (played_at), falling back to
+      // scheduled date, then rowid. Matches the /api/elo-ratings ordering so the
+      // dashboard's season Elo agrees with the ratings page.
       const seasonTourIds = new Set(seasonTours.map(t => t.id));
-      const seasonFixesChrono = allFixtures.filter(f => seasonTourIds.has(f.tournament_id) && f.played === 1);
+      const seasonFixesChrono = allFixtures
+        .filter(f => seasonTourIds.has(f.tournament_id) && f.played === 1)
+        .sort((a, b) => byPlayOrder(a, b));
       for (const f of seasonFixesChrono) {
         const hN = teamById[f.home_team_id]?.name, aN = teamById[f.away_team_id]?.name;
         if (!hN || !aN) continue;
