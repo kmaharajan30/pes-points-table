@@ -15,6 +15,8 @@ import PersonRemoveRoundedIcon from '@mui/icons-material/PersonRemoveRounded';
 import PageHeader from '../components/PageHeader';
 import ConfirmDialog from '../components/ConfirmDialog';
 import LoadingState from '../components/LoadingState';
+import FixtureFilterBar from '../components/FixtureFilterBar';
+import { fixturesToText } from './FixturesPage';
 import {
   getGroupTables, getGroupFixtures, getGroupKnockout,
   generateFixtures, seedKnockout, resetKnockoutSeeds, seedFinal,
@@ -213,10 +215,11 @@ function GroupFixtureCard({ fixture, onResult, onDelete, isAdmin }) {
 }
 
 // ── Knockout Match Card ────────────────────────────────────────────────────────
-function KoMatchCard({ match, onResult, onDelete, isActive, isAdmin }) {
+function KoMatchCard({ match, onResult, onDelete, isActive, isAdmin, dimmed=false }) {
   const home = match.homeTeam?.name;
   const away = match.awayTeam?.name;
   const both = match.leg1?.played && (match.isFinal || match.leg2?.played);
+  const dimSx = dimmed ? { opacity:0.25, filter:'grayscale(0.6)', transition:'opacity 0.2s,filter 0.2s' } : { transition:'opacity 0.2s,filter 0.2s' };
 
   if (match.isPlaceholder) {
     return (
@@ -250,8 +253,9 @@ function KoMatchCard({ match, onResult, onDelete, isActive, isAdmin }) {
   const legs = match.isFinal ? [match.leg1] : [match.leg1, match.leg2];
 
   return (
-    <Card sx={{ background:'linear-gradient(135deg,#111827,#161f30)', transition:'all 0.2s',
+    <Card sx={{ background:'linear-gradient(135deg,#111827,#161f30)',
       border: match.winner ? '1px solid rgba(0,230,118,0.3)' : '1px solid rgba(255,255,255,0.07)',
+      ...dimSx,
       '&:hover':{ boxShadow:'0 6px 24px rgba(0,0,0,0.4)', borderColor:'rgba(0,230,118,0.25)' } }}>
       <CardContent sx={{ p:'14px !important' }}>
         <Box sx={{ display:'flex', alignItems:'center', justifyContent:'space-between', mb:1.5 }}>
@@ -432,6 +436,11 @@ export default function GroupKnockoutPage({ tournament, view = 'fixtures', isAdm
   const [teamToRemove, setTeamToRemove]          = useState(null);
   const [removeTeamSaving, setRemoveTeamSaving] = useState(false);
 
+  // Filter state (applies to group stage list + highlights knockout matches)
+  const [filterTeam, setFilterTeam]     = useState(null);
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [legFilter, setLegFilter]       = useState('all');
+
   // Table view delegates to TableView after all hooks are called
   if (view === 'table') return <TableView groupTables={groupTables} loading={loading} error={error} setError={setError} tournament={tournament} bracket={bracket} />;
 
@@ -548,6 +557,34 @@ export default function GroupKnockoutPage({ tournament, view = 'fixtures', isAdm
   const champion   = finalRound?.matches[0]?.winner;
   const groups     = [...new Set(groupFixtures.map(f => f.groupName).filter(Boolean))].sort();
 
+  // ── Filtering ──────────────────────────────────────────────────────────────
+  const groupHasTwoLegs = groupFixtures.some(f => f.leg === 2);
+  const matchesFilters = (f) => {
+    if (filterTeam && f.homeTeamId !== filterTeam.id && f.awayTeamId !== filterTeam.id) return false;
+    if (statusFilter === 'pending' && f.played) return false;
+    if (statusFilter === 'played'  && !f.played) return false;
+    if (legFilter === 1 && !(f.leg === 1 || !f.leg)) return false;
+    if (legFilter === 2 && f.leg !== 2) return false;
+    return true;
+  };
+  const filteredGroupFixtures = groupFixtures.filter(matchesFilters);
+  const clearFilters = () => { setFilterTeam(null); setStatusFilter('all'); setLegFilter('all'); };
+
+  // Plain-text of visible fixtures, grouped by group name (for the copy button)
+  const buildCopyText = () => {
+    const showLeg = filteredGroupFixtures.some(f => f.leg === 2);
+    const byGroup = [...new Set(filteredGroupFixtures.map(f => f.groupName).filter(Boolean))].sort();
+    if (byGroup.length === 0) return fixturesToText(filteredGroupFixtures, showLeg);
+    return byGroup
+      .map(grp => {
+        const list = filteredGroupFixtures.filter(f => f.groupName === grp);
+        return `Group ${grp}\n${fixturesToText(list, showLeg)}`;
+      })
+      .join('\n\n');
+  };
+  const koInvolvesTeam = (match) =>
+    !filterTeam || match.homeTeam?.id === filterTeam.id || match.awayTeam?.id === filterTeam.id;
+
   return (
     <Box>
       <PageHeader
@@ -632,6 +669,23 @@ export default function GroupKnockoutPage({ tournament, view = 'fixtures', isAdm
         <LoadingState variant="rows" count={4} />
       ) : (
         <Box>
+          {/* ── Filter bar ── */}
+          {(groupFixtures.length > 0 || bracket.length > 0) && (
+            <FixtureFilterBar
+              teams={teams}
+              filterTeam={filterTeam}
+              onTeamChange={setFilterTeam}
+              statusFilter={statusFilter}
+              onStatusChange={setStatusFilter}
+              legFilter={legFilter}
+              onLegChange={setLegFilter}
+              showLeg={groupHasTwoLegs}
+              shownCount={filteredGroupFixtures.length}
+              onClear={clearFilters}
+              copyText={buildCopyText()}
+            />
+          )}
+
           {/* ── Group Fixtures ── */}
           {groups.length === 0 ? (
             <Box sx={{ textAlign:'center', py:6 }}>
@@ -651,10 +705,11 @@ export default function GroupKnockoutPage({ tournament, view = 'fixtures', isAdm
                     bgcolor:'rgba(0,230,118,0.1)', color:'primary.main', border:'1px solid rgba(0,230,118,0.2)', ml:0.5 }} />
               </Box>
               {groups.map(grp => {
-                const grpFix = groupFixtures.filter(f => f.groupName === grp);
+                const grpFix = filteredGroupFixtures.filter(f => f.groupName === grp);
                 const leg1   = grpFix.filter(f => f.leg===1 || !f.leg);
                 const leg2   = grpFix.filter(f => f.leg===2);
                 const hasTwoLegs = leg2.length > 0;
+                if (grpFix.length === 0) return null;
                 return (
                   <Box key={grp} sx={{ mb:3 }}>
                     <Box sx={{ display:'flex', alignItems:'center', gap:0.75, mb:1 }}>
@@ -682,6 +737,15 @@ export default function GroupKnockoutPage({ tournament, view = 'fixtures', isAdm
                   </Box>
                 );
               })}
+              {filteredGroupFixtures.length === 0 && (
+                <Box sx={{ textAlign:'center', py:4 }}>
+                  <Typography sx={{ fontSize:32, mb:1 }}>🔍</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    No group fixtures match the current filters
+                    {filterTeam ? ` for ${filterTeam.name}` : ''}.
+                  </Typography>
+                </Box>
+              )}
             </Box>
           )}
 
@@ -722,7 +786,8 @@ export default function GroupKnockoutPage({ tournament, view = 'fixtures', isAdm
                         <Stack spacing={1.5}>
                           {round.matches.map(match => (
                             <KoMatchCard key={match.matchNumber} match={match}
-                              onResult={setResultFix} onDelete={setDeleteFix} isActive={isCurrent} isAdmin={isAdmin} />
+                              onResult={setResultFix} onDelete={setDeleteFix} isActive={isCurrent} isAdmin={isAdmin}
+                              dimmed={!!filterTeam && !match.isPlaceholder && !koInvolvesTeam(match)} />
                           ))}
                         </Stack>
                       </Box>

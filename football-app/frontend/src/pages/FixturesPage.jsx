@@ -16,10 +16,12 @@ import AccountTreeRoundedIcon from '@mui/icons-material/AccountTreeRounded';
 import EmojiEventsRoundedIcon from '@mui/icons-material/EmojiEventsRounded';
 import PersonAddAlt1RoundedIcon from '@mui/icons-material/PersonAddAlt1Rounded';
 import PersonRemoveRoundedIcon from '@mui/icons-material/PersonRemoveRounded';
+import FilterListRoundedIcon from '@mui/icons-material/FilterListRounded';
 import PageHeader from '../components/PageHeader';
 import EmptyState from '../components/EmptyState';
 import ConfirmDialog from '../components/ConfirmDialog';
 import LoadingState from '../components/LoadingState';
+import FixtureFilterBar from '../components/FixtureFilterBar';
 import {
   getFixtures, createFixture, addResult, deleteFixture,
   getTeams, generateFixtures, knockoutAdvance, getKnockoutBracket, getPlayers,
@@ -30,6 +32,20 @@ import {
 const COLORS = ['#00e676','#651fff','#ff5252','#ffd740','#40c4ff','#ff6e40','#b2ff59','#e040fb','#64ffda','#ff4081'];
 const getColor = (name='') => { let h=0; for(const c of name) h=(h*31+c.charCodeAt(0))&0xffffffff; return COLORS[Math.abs(h)%COLORS.length]; };
 const getInit  = (name='') => name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
+
+// Build a plain-text list of fixtures (used by the "copy pending matches" button)
+// Leg labels are only added when the set actually spans two legs. Pass
+// `showLeg` explicitly to keep labeling consistent across grouped lists.
+export function fixturesToText(list = [], showLeg = list.some(f => f.leg === 2)) {
+  return list
+    .map((f, i) => {
+      const home = f.homeTeam?.name || '?';
+      const away = f.awayTeam?.name || '?';
+      const leg  = showLeg && f.leg ? ` (Leg ${f.leg})` : '';
+      return `${i + 1}. ${home} vs ${away}${leg}`;
+    })
+    .join('\n');
+}
 
 function TeamBadge({ name='', size=36 }) {
   return (
@@ -225,8 +241,29 @@ function LeagueFixtures({ tournament, teams, fixtures, onResult, onDelete, onReg
   const [teamToRemove, setTeamToRemove]          = useState(null);
   const [removeTeamSaving, setRemoveTeamSaving] = useState(false);
 
-  const leg1 = fixtures.filter(f=>f.leg===1||!f.leg);
-  const leg2 = fixtures.filter(f=>f.leg===2);
+  // ── Filter state ───────────────────────────────────────────────────────────
+  const [filterTeam, setFilterTeam]     = useState(null);   // team object or null (All)
+  const [statusFilter, setStatusFilter] = useState('all');  // 'all' | 'pending' | 'played'
+  const [legFilter, setLegFilter]       = useState('all');  // 'all' | 1 | 2
+
+  // Only offer a leg filter when there are actually second-leg fixtures
+  const hasTwoLegs = fixtures.some(f => f.leg === 2);
+
+  // Apply team + status + leg filters
+  const matchesFilters = (f) => {
+    if (filterTeam && f.homeTeamId !== filterTeam.id && f.awayTeamId !== filterTeam.id) return false;
+    if (statusFilter === 'pending' && f.played) return false;
+    if (statusFilter === 'played'  && !f.played) return false;
+    if (legFilter === 1 && !(f.leg === 1 || !f.leg)) return false;
+    if (legFilter === 2 && f.leg !== 2) return false;
+    return true;
+  };
+
+  const filtered = fixtures.filter(matchesFilters);
+  const leg1 = filtered.filter(f=>f.leg===1||!f.leg);
+  const leg2 = filtered.filter(f=>f.leg===2);
+
+  const clearFilters = () => { setFilterTeam(null); setStatusFilter('all'); setLegFilter('all'); };
 
   const handleAdd = async () => {
     if (!form.homeTeamId||!form.awayTeamId) return;
@@ -332,9 +369,35 @@ function LeagueFixtures({ tournament, teams, fixtures, onResult, onDelete, onReg
         </Box>
       )}
 
+      {/* ── Filter bar ─────────────────────────────────────────────────── */}
+      {fixtures.length > 0 && (
+        <FixtureFilterBar
+          teams={teams}
+          filterTeam={filterTeam}
+          onTeamChange={setFilterTeam}
+          statusFilter={statusFilter}
+          onStatusChange={setStatusFilter}
+          legFilter={legFilter}
+          onLegChange={setLegFilter}
+          showLeg={hasTwoLegs}
+          shownCount={filtered.length}
+          onClear={clearFilters}
+          copyText={fixturesToText(filtered)}
+        />
+      )}
+
       {fixtures.length===0 ? (
         <EmptyState icon={<SportsSoccerRoundedIcon sx={{ fontSize:48 }}/>} title="No fixtures yet"
           subtitle="Tap 'Auto-Generate' to create the full fixture list" />
+      ) : filtered.length===0 ? (
+        <EmptyState icon={<FilterListRoundedIcon sx={{ fontSize:48 }}/>} title="No matching fixtures"
+          subtitle={(() => {
+            const statusTxt = statusFilter !== 'all' ? `${statusFilter} ` : '';
+            const legTxt    = legFilter !== 'all' ? ` in Leg ${legFilter}` : '';
+            return filterTeam
+              ? `No ${statusTxt}fixtures for ${filterTeam.name}${legTxt}`
+              : `No ${statusTxt || 'matching '}fixtures${legTxt}`;
+          })()} />
       ) : (
         <Stack spacing={2.5}>
           {leg1.length>0 && (
@@ -547,6 +610,14 @@ function LeagueFixtures({ tournament, teams, fixtures, onResult, onDelete, onReg
 
 // ─── Knockout Bracket View ────────────────────────────────────────────────────
 function KnockoutBracket({ tournament, teams, bracket, onResult, onDelete, onAdvance, advancing, onRegenerate, generating, isAdmin }) {
+  const [filterTeam, setFilterTeam] = useState(null);
+
+  // A match "involves" the filtered team if either side matches
+  const matchInvolvesTeam = (match) => {
+    if (!filterTeam) return true;
+    return match.homeTeam?.id === filterTeam.id || match.awayTeam?.id === filterTeam.id;
+  };
+
   if (!bracket || bracket.length===0) {
     return (
       <Box>
@@ -611,6 +682,18 @@ function KnockoutBracket({ tournament, teams, bracket, onResult, onDelete, onAdv
         )}
       </Box>
 
+      {/* Team filter — highlights the selected team's matches across rounds */}
+      <FixtureFilterBar
+        teams={teams}
+        filterTeam={filterTeam}
+        onTeamChange={setFilterTeam}
+        statusFilter="all"
+        showStatus={false}
+        showLeg={false}
+        shownCount={bracket.reduce((n, r) => n + r.matches.filter(m => !m.isPlaceholder && matchInvolvesTeam(m)).length, 0)}
+        onClear={() => setFilterTeam(null)}
+      />
+
       {/* Bracket — horizontal scroll on mobile */}
       <Box sx={{ overflowX:'auto', pb:1, mx:-1.5, px:1.5 }}>
         <Box sx={{ display:'flex', gap:{ xs:1.5, sm:2 }, alignItems:'flex-start',
@@ -641,7 +724,8 @@ function KnockoutBracket({ tournament, teams, bracket, onResult, onDelete, onAdv
                 <Stack spacing={1.5}>
                   {round.matches.map(match=>(
                     <KnockoutMatch key={match.matchNumber} match={match}
-                      onResult={onResult} onDelete={onDelete} isCurrentRound={isActive} isAdmin={isAdmin} />
+                      onResult={onResult} onDelete={onDelete} isCurrentRound={isActive} isAdmin={isAdmin}
+                      dimmed={!!filterTeam && !match.isPlaceholder && !matchInvolvesTeam(match)} />
                   ))}
                 </Stack>
               </Box>
@@ -653,12 +737,13 @@ function KnockoutBracket({ tournament, teams, bracket, onResult, onDelete, onAdv
   );
 }
 
-function KnockoutMatch({ match, onResult, onDelete, isCurrentRound, isAdmin }) {
+function KnockoutMatch({ match, onResult, onDelete, isCurrentRound, isAdmin, dimmed=false }) {
   const homeName = match.homeTeam?.name;
   const awayName = match.awayTeam?.name;
   const winnerName = match.winner?.name;
   const both = match.leg1?.played && match.leg2?.played;
   const isPlaceholder = match.isPlaceholder || (!homeName && !awayName);
+  const dimSx = dimmed ? { opacity:0.25, filter:'grayscale(0.6)', transition:'opacity 0.2s,filter 0.2s' } : { transition:'opacity 0.2s,filter 0.2s' };
 
   if (isPlaceholder) {
     return (
@@ -698,7 +783,7 @@ function KnockoutMatch({ match, onResult, onDelete, isCurrentRound, isAdmin }) {
   return (
     <Card sx={{ background:'linear-gradient(135deg,#111827,#161f30)',
       border: match.winner ? '1px solid rgba(0,230,118,0.3)' : '1px solid rgba(255,255,255,0.07)',
-      transition:'all 0.2s',
+      ...dimSx,
       '&:hover':{ boxShadow:'0 6px 24px rgba(0,0,0,0.4)', borderColor:'rgba(0,230,118,0.25)' } }}>
       <CardContent sx={{ p:'14px !important' }}>
         {/* Teams header */}
